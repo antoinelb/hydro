@@ -39,7 +39,7 @@ def run_server() -> None:
     )
 
     uvicorn.run(
-        "src.main:create_app",
+        "hydro.main:create_app",
         factory=True,
         host=config.HOST,
         port=config.PORT,

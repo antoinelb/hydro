@@ -21,7 +21,7 @@ def init_logging() -> None:
             "formatters": {
                 "simple": {
                     "format": "%(levelname)s - %(message)s",
-                    "class": "src.logging.ColourFormatter",
+                    "class": "hydro.logging.ColourFormatter",
                 },
                 "complete": {
                     "datefmt": "%Y-%m-%d %H:%M:%S",
@@ -55,6 +55,11 @@ def init_logging() -> None:
                         "handlers": ["console"],
                         "level": "DEBUG" if config.DEBUG else "INFO",
                         "propagate": True,
+                    },
+                    "uvicorn.access": {
+                        "handlers": ["console"],
+                        "level": "INFO",
+                        "propagate": False,
                     },
                 },
             },

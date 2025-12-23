@@ -1,0 +1,53 @@
+#notifications {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+  height: auto;
+  left: calc(50% - 10em);
+  margin-top: 2em;
+  position: absolute;
+  top: 0;
+  width: 20em;
+
+  & .notification {
+    background: oklch(var(--bg));
+    border: 1px solid oklch(var(--fg) / 0.5);
+    border-radius: 1em;
+    cursor: pointer;
+    display: grid;
+    gap: 0.5em;
+    grid-template-rows: max-content 0.25em;
+    padding: 0.5em 1em;
+    text-align: center;
+    z-index: 10;
+
+    &.error {
+      background: oklch(0.35 0.15 30);
+      border: 1px solid oklch(0.6 0.25 30);
+      color: oklch(var(--fg-dark));
+
+      & > div {
+        background: oklch(0.45 0.15 30);
+
+        & > div {
+          background: oklch(0.5 0.15 30);
+        }
+      }
+    }
+
+    & > div {
+      background: oklch(var(--fg) / 0.25);
+      border-radius: 0.5em;
+      height: 100%;
+      text-align: start;
+      width: 100%;
+
+      & > div {
+        animation: progress 3s linear;
+        background: oklch(var(--fg) / 0.5);
+        border-radius: 0.5em;
+        height: 100%;
+      }
+    }
+  }
+}

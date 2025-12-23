@@ -5,13 +5,14 @@ from starlette.responses import HTMLResponse, PlainTextResponse, Response
 from starlette.routing import BaseRoute, Mount, Route
 from starlette.staticfiles import StaticFiles
 
+from hydro.utils import paths
 
 #########
 # types #
 #########
 
-pyproject_path = utils.paths.root_dir / "pyproject.toml"
-static_dir = utils.paths.root_dir / "src" / "static"
+pyproject_path = paths.root_dir / "pyproject.toml"
+static_dir = paths.root_dir / "src" / "static"
 
 ##########
 # public #
@@ -27,8 +28,6 @@ def get_routes() -> list[BaseRoute]:
             "/static",
             app=StaticFiles(directory=str(static_dir.absolute())),
         ),
-        Mount("/map", routes=map.get_routes()),
-        Mount("/data", routes=data.get_routes()),
     ]
 
 

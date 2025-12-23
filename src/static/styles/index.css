@@ -1,0 +1,35 @@
+@import "./template.css";
+@import "./elements.css";
+@import "./settings.css";
+@import "./notifications.css";
+
+body {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  grid-template-rows: max-content 1fr;
+  position: relative;
+}
+
+main {
+  overflow-y: scroll;
+}
+
+.loading {
+  animation: spin 5s linear infinite;
+  height: 3em;
+  left: calc(50% - 1.5em);
+  position: absolute;
+  stroke: #009999;
+  top: calc(50% - 1.5em);
+  width: 3em;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}
