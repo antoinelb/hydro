@@ -90,42 +90,19 @@ export function formatNumber(n) {
   return n.toLocaleString("en-US").replace(/,/g, " ");
 }
 
-export function createSlider(id, min, max, isInteger, events = []) {
-  // function updateSlider(slider) {
-  //   const input = slider.querySelector("input");
-  //   const span = slider.querySelector(".slider__value");
-  //
-  //   if (isInteger) {
-  //     span.textContent = input.value;
-  //   } else {
-  //     span.textContent = parseFloat(input.value).toFixed(1);
-  //   }
-  //
-  //   const percent =
-  //     ((parseFloat(input.value) - parseFloat(input.getAttribute("min"))) /
-  //       (parseFloat(input.getAttribute("max")) -
-  //         parseFloat(input.getAttribute("min")))) *
-  //     100;
-  //
-  //   span.style.setProperty("left", `${round(percent, 1)}%`);
-  //   span.style.setProperty("transform", `translateX(-${percent}%)`);
-  // }
-  //
-  // function createTick(i) {
-  //   const thumbRadius = 10;
-  //   const percent = (i / (nValues - 1)) * 100;
-  //   const offset = thumbRadius * (1 - (2 * i) / (nValues - 1));
-  //
-  //   const val = isInteger
-  //     ? Math.round(min + (i * (max - min)) / (nValues - 1)).toString()
-  //     : round(min + (i * (max - min)) / (nValues - 1), 1).toFixed(1);
-  //
-  //   return create("span", { left: `calc(${percent}% + ${offset}px)` }, [val]);
-  // }
-  //
-  const initialVal = isInteger
-    ? Math.round((max + min) / 2)
-    : round((max + min) / 2, 1);
+export function createSlider(
+  id,
+  min,
+  max,
+  isInteger,
+  events = [],
+  initialVal = null,
+) {
+  if (initialVal === null) {
+    initialVal = isInteger
+      ? Math.round((max + min) / 2)
+      : round((max + min) / 2, 1);
+  }
 
   return create("div", { class: "slider" }, [
     create(
@@ -139,6 +116,7 @@ export function createSlider(id, min, max, isInteger, events = []) {
       },
       [],
       [
+        ...events,
         {
           event: "input",
           fct: (event) => {
@@ -159,21 +137,20 @@ export function createSlider(id, min, max, isInteger, events = []) {
       },
       [],
       [
-        ...events,
         {
           event: "input",
           fct: (event) => {
-            setInterval(() => {
+            setTimeout(() => {
               event.target.value = Math.min(
                 Math.max(event.target.value, min),
                 max,
               );
-              event.target.parentNode.querySelector(
+              const slider = event.target.parentNode.querySelector(
                 "input[type='range']",
-              ).value = event.target.value;
-            }, 1000);
-            event.target.parentNode.querySelector("input[type='range']").value =
-              event.target.value;
+              );
+              slider.value = event.target.value;
+              slider.dispatchEvent(new Event("change", { bubbles: true }));
+            }, 500);
           },
         },
       ],

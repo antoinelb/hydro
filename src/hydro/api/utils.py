@@ -2,9 +2,12 @@ import json
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
+import polars as pl
 from starlette.requests import Request
 from starlette.responses import JSONResponse as _JSONResponse
 from starlette.responses import PlainTextResponse, Response
+
+from hydro.utils.data import NumericType
 
 ##########
 # public #
@@ -224,5 +227,15 @@ def convert_for_json(data: Any) -> Any:
             .replace(tzinfo=timezone.utc)
             .timestamp()
         )
+    elif isinstance(data, pl.DataFrame):
+        return [
+            convert_for_json(d)
+            for d in data.with_columns(
+                pl.when(pl.col(NumericType).is_infinite())
+                .then(None)
+                .otherwise(pl.col(NumericType))
+                .name.keep()
+            ).to_dicts()
+        ]
     else:
         return data

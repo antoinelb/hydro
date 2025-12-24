@@ -6,13 +6,14 @@
 
 body {
   display: grid;
-  grid-template-rows: max-content 1fr;
+  grid-template-rows: 8em 1fr;
 }
 
 #meta {
-  display: grid;
-  grid-gap: 2.5em;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  display: flex;
+  flex-direction: row;
+  gap: 2.5em;
+  justify-content: center;
   padding: 2.5em 2.5em 1em 2.5em;
 
   & > div {
@@ -20,8 +21,11 @@ body {
     border: 1px solid oklch(var(--bg));
     border-radius: 0.5em;
     cursor: pointer;
+    height: max-content;
     padding: 0.5em 1em;
+    text-align: center;
     transition: border 300ms;
+    width: 10em;
 
     &.open {
       border: 1px solid oklch(var(--fg) / 0.5);
@@ -64,6 +68,7 @@ body {
       position: absolute;
       right: 0.25em;
       top: 0.25em;
+      z-index: 1;
 
       &:hover {
         background: oklch(var(--fg) / 0.1);

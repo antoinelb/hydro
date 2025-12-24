@@ -180,7 +180,13 @@ async function init() {
     station.initialMsg,
   ].forEach((msg) => {
     if (msg) {
-      dispatch(msg);
+      if (Array.isArray(msg)) {
+        msg.forEach((_msg) => {
+          dispatch(_msg);
+        });
+      } else {
+        dispatch(msg);
+      }
     }
   });
 }
