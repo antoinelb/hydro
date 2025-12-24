@@ -7,6 +7,8 @@ from starlette.staticfiles import StaticFiles
 
 from hydro.utils import paths
 
+from . import map
+
 #########
 # types #
 #########
@@ -28,6 +30,7 @@ def get_routes() -> list[BaseRoute]:
             "/static",
             app=StaticFiles(directory=str(static_dir.absolute())),
         ),
+        Mount("/map", routes=map.get_routes()),
     ]
 
 

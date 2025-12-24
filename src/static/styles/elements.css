@@ -1,115 +1,20 @@
 .slider {
   align-items: center;
-  display: flex;
-  flex-direction: column;
-  position: relative;
+  display: grid;
+  gap: 1em;
+  grid-template-columns: 1fr 3em;
   width: 100%;
 
-  & .slider__value {
-    left: 50%;
-    position: absolute;
-    text-align: center;
-    top: 0;
-    transform: translateX(-50%);
-  }
-
   & input[type="range"] {
-    margin: 1.5em 0 0 0;
-    padding: 0;
-    width: 100%;
-  }
-
-  & .slider__range {
-    height: 1.5em;
     margin: 0;
     padding: 0;
-    position: relative;
-    width: 100%;
-
-    & span {
-      position: absolute;
-      transform: translateX(-50%);
-    }
-  }
-}
-
-.double-slider {
-  background: oklch(var(--theme) / 0.1);
-  height: 0.5em;
-  margin: 1.5em 0;
-  position: relative;
-
-  & .slider__value-min {
-    left: 0%;
-    pointer-events: none;
-    position: absolute;
-    text-align: center;
-    text-align: right;
-    top: -1.5em;
-    transform: translateX(calc(-100% + 0.5em));
-    user-select: none;
-  }
-
-  & .slider__value-max {
-    left: 100%;
-    pointer-events: none;
-    position: absolute;
-    text-align: center;
-    top: -1.5em;
-    transform: translateX(-0.5em);
-    user-select: none;
-  }
-
-  & .double-slider__range {
-    background: oklch(var(--theme) / 0.25);
-    height: 0.5em;
-    left: 0%;
-    position: absolute;
-    top: 0;
     width: 100%;
   }
 
-  & input[type="range"] {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    background: none;
-    border: none;
-    height: 3em;
-    left: 0;
+  & input[type="number"] {
     margin: 0;
     padding: 0;
-    pointer-events: none;
-    position: absolute;
-    top: -1.25em;
     width: 100%;
-    z-index: 1;
-
-    &::-webkit-slider-thumb,
-    &::-moz-range-thumb {
-      -webkit-appearance: none;
-      -moz-appearance: none;
-      background-color: oklch(var(--theme));
-      border: none;
-      border-radius: 50%;
-      height: 1em;
-      pointer-events: auto;
-      width: 1em;
-    }
-
-    &.double-slider__start {
-      &::-webkit-slider-thumb,
-      &::-moz-range-thumb {
-        transform: translateX(-0.5em);
-      }
-    }
-
-    &.double-slider__end {
-      &::-webkit-slider-thumb,
-      &::-moz-range-thumb {
-        transform: translateX(0.5em);
-      }
-    }
   }
 }
 
@@ -149,5 +54,25 @@
     top: 0;
     width: 100%;
     z-index: -1;
+  }
+}
+
+.loading {
+  animation: spin 5s linear infinite;
+  height: 3em;
+  left: calc(50% - 1.5em);
+  position: absolute;
+  stroke: #009999;
+  top: calc(50% - 1.5em);
+  width: 3em;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
   }
 }

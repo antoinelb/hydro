@@ -2,6 +2,7 @@ import { create } from "./utils.js";
 
 import * as settings from "./settings.js";
 import * as notifications from "./notifications.js";
+import * as station from "./station.js";
 
 /*********/
 /* model */
@@ -13,6 +14,7 @@ function initModel() {
     loading: false,
     settings: settings.initModel(),
     notifications: notifications.initModel(),
+    station: station.initModel(),
   };
 }
 
@@ -26,6 +28,9 @@ async function update(model, msg, dispatch) {
   switch (msg.type) {
     case "CheckEscape":
       dispathCheckEscape(model, msg.data, dispatch);
+      return model;
+    case "SelectSection":
+      dispatchSelectSection(msg.data, dispatch);
       return model;
     case "SettingsMsg":
       return {
@@ -41,6 +46,11 @@ async function update(model, msg, dispatch) {
           dispatch,
         ),
       };
+    case "StationMsg":
+      return {
+        ...model,
+        station: await station.update(model.station, msg.data, dispatch),
+      };
     default:
       return model;
   }
@@ -52,24 +62,32 @@ function dispathCheckEscape(model, event, dispatch) {
       event.type === "click" ||
       (event.type === "keydown" && event.key === "Escape")
     ) {
-      ["SettingsMsg", "NotificationsMsg"].forEach((msg) => {
+      ["SettingsMsg", "NotificationsMsg", "StationMsg"].forEach((msg) => {
         dispatch({ type: msg, data: { type: "CheckEscape", data: event } });
       });
     }
   }
 }
 
+function dispatchSelectSection(section, dispatch) {
+  ["StationMsg"].forEach((msg) => {
+    dispatch({ type: msg, data: { type: "SelectSection", data: section } });
+  });
+}
+
 /********/
 /* view */
 /********/
 
-async function initView(dispatch) {
+async function initView(model, dispatch) {
   await injectSvgSprite();
   document.body.append(
     settings.initView(dispatch),
     notifications.initView(dispatch),
-    create("main"),
+    create("div", { id: "meta" }),
+    create("main", { id: "main" }),
   );
+  station.initView(model.station, dispatch);
   document.body.addEventListener("click", (event) =>
     dispatch({ type: "CheckEscape", data: event }),
   );
@@ -91,8 +109,11 @@ function view(msg, model, dispatch) {
     case "SettingsMsg":
       settings.view(model.settings, dispatch);
       break;
-    case "notificationsMsg":
+    case "NotificationsMsg":
       notifications.view(model.notifications, dispatch);
+      break;
+    case "StationMsg":
+      station.view(model.station, dispatch);
       break;
   }
   loadingView(model);
@@ -100,7 +121,10 @@ function view(msg, model, dispatch) {
 
 function loadingView(model) {
   const loading =
-    model.loading || model.settings.loading || model.notifications.loading;
+    model.loading ||
+    model.settings.loading ||
+    model.notifications.loading ||
+    model.station.loading;
   if (loading) {
     if (
       document.querySelector("link[rel~='icon']").href !==
@@ -148,8 +172,13 @@ async function init() {
     }
   };
 
-  await initView(dispatch);
-  [initialMsg, settings.initialMsg, notifications.initialMsg].forEach((msg) => {
+  await initView(model, dispatch);
+  [
+    initialMsg,
+    settings.initialMsg,
+    notifications.initialMsg,
+    station.initialMsg,
+  ].forEach((msg) => {
     if (msg) {
       dispatch(msg);
     }
