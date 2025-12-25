@@ -105,7 +105,15 @@ async def _handle_station_message(
         return data
     else:
         station = stations[0, "station"]
-        await _send(ws, "station", station)
+        await _send(
+            ws,
+            "station",
+            {
+                "station": stations[0, "station"],
+                "lat": stations[0, "lat"],
+                "lon": stations[0, "lon"],
+            },
+        )
         return {
             **data,
             "current_station": station,

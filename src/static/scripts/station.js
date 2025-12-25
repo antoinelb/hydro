@@ -7,19 +7,21 @@ import { create, createSlider, createLoading, clear } from "./utils.js";
 export function initModel() {
   return {
     loading: false,
-    open: true,
+    open: false,
     map: null,
     ws: null,
     stations: null,
-    currentStation: window.localStorage.getItem("current-station") || null,
+    currentStation: window.localStorage.getItem("current-station")
+      ? {
+          station: window.localStorage.getItem("current-station"),
+          lat: null,
+          lon: null,
+        }
+      : null,
   };
 }
 
 export const initialMsg = [
-  {
-    type: "StationMsg",
-    data: { type: "CreateMap" },
-  },
   {
     type: "StationMsg",
     data: { type: "Connect" },
@@ -31,14 +33,17 @@ export const initialMsg = [
 /**********/
 
 export async function update(model, msg, dispatch) {
-  console.log(msg, model);
   const globalDispatch = dispatch;
   dispatch = createDispatch(dispatch);
   switch (msg.type) {
     case "CheckEscape":
       return model;
     case "SelectSection":
-      return { ...model, open: msg.data === "station" };
+      const open = msg.data === "station";
+      if (open && model.map === null) {
+        dispatch({ type: "CreateMap" });
+      }
+      return { ...model, open: open };
     case "CreateMap":
       createMap(dispatch);
       return { ...model, loading: true };
@@ -59,6 +64,9 @@ export async function update(model, msg, dispatch) {
       getStations(model.ws);
       return model;
     case "GotStations":
+      if (model.currentStation !== null && model.currentStation.lat === null) {
+        dispatch({ type: "UpdateStation", data: model.currentStation.station });
+      }
       return {
         ...model,
         stations: msg.data,
@@ -67,12 +75,20 @@ export async function update(model, msg, dispatch) {
       updateStation(model.ws, msg.data);
       return model;
     case "UpdatedStation":
-      window.localStorage.setItem("current-station", msg.data);
+      const currentStation = {
+        station: msg.data.station,
+        lat: msg.data.lat,
+        lon: msg.data.lon,
+      };
+      window.localStorage.setItem("current-station", currentStation.station);
       document.getElementById("station-selection__station").value = "";
       document.getElementById("station-selection__n-years").value =
         document.getElementById("station-selection__n-years").min;
       dispatch({ type: "GetStations" });
-      return { ...model, currentStation: msg.data };
+      return {
+        ...model,
+        currentStation: currentStation,
+      };
     default:
       return model;
   }
@@ -207,6 +223,7 @@ function initMetaView(model, globalDispatch) {
       [
         create("h2", {}, ["Station"]),
         create("span", { id: "station__station" }, []),
+        create("span", { id: "station__lat-lon" }, []),
       ],
       [
         {
@@ -271,7 +288,11 @@ function initMainView(model, dispatch) {
 function metaView(model) {
   if (model.currentStation !== null) {
     document.getElementById("station__station").textContent =
-      model.currentStation;
+      model.currentStation.station;
+    if (model.currentStation.lat !== null) {
+      document.getElementById("station__lat-lon").textContent =
+        `(${model.currentStation.lat.toFixed(3)}, ${model.currentStation.lon.toFixed(3)})`;
+    }
   }
 }
 
@@ -287,7 +308,6 @@ function initMapView(map) {
 }
 
 function mapView(model, dispatch) {
-  console.log(model.currentStation);
   d3.select(model.map.getPanes().overlayPane)
     .selectAll("div")
     .data(model.stations, (d) => d.station)
@@ -296,7 +316,8 @@ function mapView(model, dispatch) {
         enter
           .append("div")
           .attr("class", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? "map__marker map__marker--current"
               : "map__marker",
           )
@@ -307,12 +328,14 @@ function mapView(model, dispatch) {
               `translate(${model.map.latLngToLayerPoint([d.lat, d.lon]).x}px, ${model.map.latLngToLayerPoint([d.lat, d.lon]).y}px)`,
           )
           .style("width", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
           .style("height", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
@@ -325,17 +348,20 @@ function mapView(model, dispatch) {
       (update) =>
         update
           .attr("class", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? "map__marker map__marker--current"
               : "map__marker",
           )
           .style("width", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
           .style("height", (d) =>
-            d.station === model.currentStation
+            model.currentStation !== null &&
+            d.station === model.currentStation.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           ),
@@ -349,12 +375,14 @@ function mapView(model, dispatch) {
           `translate(${model.map.latLngToLayerPoint([d.lat, d.lon]).x}px, ${model.map.latLngToLayerPoint([d.lat, d.lon]).y}px)`,
       )
       .style("width", (d) =>
-        d.station === model.currentStation
+        model.currentStation !== null &&
+        d.station === model.currentStation.station
           ? `${10 + (model.map._zoom - 6) * 2}px`
           : `${5 + (model.map._zoom - 6) * 2}px`,
       )
       .style("height", (d) =>
-        d.station === model.currentStation
+        model.currentStation !== null &&
+        d.station === model.currentStation.station
           ? `${10 + (model.map._zoom - 6) * 2}px`
           : `${5 + (model.map._zoom - 6) * 2}px`,
       );
