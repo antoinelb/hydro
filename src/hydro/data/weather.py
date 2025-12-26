@@ -13,28 +13,10 @@ from hydro.utils import paths
 ##########
 
 
-def add_weather_data(
-    hydro_data: pl.DataFrame, *, n_closest: int = 3, refresh: bool = False
-) -> pl.DataFrame:
-    weather_stations = _read_weather_stations()
-    closest_stations = _determine_closest_weather_stations(
-        hydro_data, weather_stations, n=n_closest
-    )
-    weather_data = asyncio.run(
-        _read_station_data(closest_stations, refresh=refresh)
-    )
-    return hydro_data.join(weather_data, on="date").sort("date")
-
-
-###########
-# private #
-###########
-
-
-def _read_weather_stations() -> pl.DataFrame:
+def read_stations() -> pl.DataFrame:
     url = "https://api.weather.gc.ca/collections/climate-stations/items?f=json&limit=10000"
 
-    path = paths.data_dir / "data" / "raw" / "weather" / "stations.ipc"
+    path = paths.data_dir / "raw" / "weather" / "stations.ipc"
 
     if path.exists():
         return pl.read_ipc(path)
@@ -61,7 +43,7 @@ def _read_weather_stations() -> pl.DataFrame:
         return data
 
 
-async def _read_station_data(
+async def read_station_data(
     stations: pl.DataFrame,
     *,
     limit: int = 10000,
@@ -73,7 +55,7 @@ async def _read_station_data(
     async with httpx.AsyncClient() as client:
         _data = await asyncio.gather(
             *[
-                _read_single_station_data(
+                _read_station_data(
                     client,
                     base_url,
                     row["id"],
@@ -98,7 +80,23 @@ async def _read_station_data(
     )
 
 
-async def _read_single_station_data(
+async def read_closest_data(
+    hydro_data: pl.DataFrame, *, n: int = 3, refresh: bool = False
+) -> pl.DataFrame:
+    weather_stations = read_stations()
+    closest_stations = _determine_closest_weather_stations(
+        hydro_data, weather_stations, n=n
+    )
+    weather_data = await read_station_data(closest_stations, refresh=refresh)
+    return hydro_data.select("date").join(weather_data, on="date").sort("date")
+
+
+###########
+# private #
+###########
+
+
+async def _read_station_data(
     client: httpx.AsyncClient,
     base_url: str,
     id: str,
@@ -109,9 +107,7 @@ async def _read_single_station_data(
 ) -> pl.DataFrame:
     base_url = f"{base_url}&CLIMATE_IDENTIFIER={id}"
 
-    path = (
-        paths.data_dir / "data" / "raw" / "weather" / "stations" / f"{id}.ipc"
-    )
+    path = paths.data_dir / "raw" / "weather" / "stations" / f"{id}.ipc"
 
     if path.exists() and not refresh:
         return pl.read_ipc(path)

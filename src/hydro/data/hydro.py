@@ -50,19 +50,7 @@ def read_stations() -> pl.DataFrame:
     return data
 
 
-def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
-    path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.ipc"
-
-    if path.exists() and not refresh:
-        return pl.read_ipc(path)
-    else:
-        path.parent.mkdir(exist_ok=True, parents=True)
-        data = asyncio.run(_fetch_data(id))
-        data.write_ipc(path)
-        return data
-
-
-async def read_data_async(id: str, *, refresh: bool = False) -> pl.DataFrame:
+async def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
     path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.ipc"
 
     if path.exists() and not refresh:

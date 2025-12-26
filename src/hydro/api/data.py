@@ -4,7 +4,7 @@ import polars as pl
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from hydro.data import hydro
+from hydro.data import hydro, precipitation, weather
 from hydro.logging import logger
 
 from .utils import convert_for_json
@@ -15,7 +15,12 @@ from .utils import convert_for_json
 
 
 class Data(TypedDict):
-    pass
+    pet_model: str | None
+    snow_model: str | None
+    hydro_data: pl.DataFrame | None
+    weather_data: pl.DataFrame | None
+    precipitation_data: pl.DataFrame | None
+    pet_data: pl.DataFrame | None
 
 
 PetModels = ["oudin"]
@@ -68,6 +73,14 @@ async def _handle_message(
             return await _handle_hydro_data_message(
                 ws, msg.get("data", {}), data
             )
+        case "weather_data":
+            return await _handle_weather_data_message(
+                ws, msg.get("data", {}), data
+            )
+        case "precipitation_data":
+            return await _handle_precipitation_data_message(
+                ws, msg.get("data", {}), data
+            )
 
 
 async def _handle_models_message(ws: WebSocket, data: Data) -> Data:
@@ -110,14 +123,49 @@ async def _handle_hydro_data_message(
 
     # station is in the format `<name> (<id>)`
     id = msg_data["station"].split()[-1][1:-1]
-    hydro_data = await hydro.read_data_async(
+    hydro_data = await hydro.read_data(
         id, refresh=msg_data.get("refresh", False)
     )
+    data = {**data, "hydro_data": hydro_data}
     hydro_data = _prepare_data_to_show(hydro_data.drop("lat", "lon"))
 
     await _send(ws, "hydro_data", convert_for_json(hydro_data))
 
-    return {**data, "hydro_data": hydro_data}
+    return data
+
+
+async def _handle_weather_data_message(
+    ws: WebSocket, msg_data: dict[str, Any], data: Data
+) -> Data:
+    if data["hydro_data"] is None:
+        await _send(ws, "error", "The hydro data must have been read.")
+        return data
+
+    weather_data = await weather.read_closest_data(
+        data["hydro_data"], refresh=msg_data.get("refresh", False)
+    )
+    data = {**data, "weather_data": weather_data}
+    weather_data = _prepare_data_to_show(weather_data.drop("precipitation"))
+
+    await _send(ws, "weather_data", convert_for_json(weather_data))
+
+    return data
+
+
+async def _handle_precipitation_data_message(
+    ws: WebSocket, msg_data: dict[str, Any], data: Data
+) -> Data:
+    if data["hydro_data"] is None:
+        await _send(ws, "error", "The hydro data must have been read.")
+        return data
+
+    precipitation_data = await precipitation.read_data(data["hydro_data"])
+    data = {**data, "precipitation_data": precipitation_data}
+    precipitation_data = _prepare_data_to_show(precipitation_data)
+
+    await _send(ws, "precipitation_data", convert_for_json(precipitation_data))
+
+    return data
 
 
 ###########

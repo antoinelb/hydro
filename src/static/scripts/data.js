@@ -20,6 +20,8 @@ export function initModel() {
         ? null
         : window.localStorage.getItem("snow_model"),
     hydroData: null,
+    weatherData: null,
+    precipitationData: null,
   };
 }
 
@@ -54,14 +56,17 @@ export async function update(model, msg, dispatch) {
         dispatch({ type: "GetModels" });
       }
       if (model.station !== null && model.hydroData === null) {
-        dispatch({ type: "GetHydroData", data: model.station });
+        dispatch({
+          type: "GetData",
+          data: { station: model.station, type: "hydro" },
+        });
       }
       return { ...model, loading: false, ws: msg.data };
     case "Disconnected":
       setTimeout(() => dispatch({ type: "Connect" }), 3000);
       return { ...model, ws: null };
     case "UpdateStation":
-      dispatch({ type: "GetHydroData", data: msg.data });
+      dispatch({ type: "GetData", data: { station: msg.data, type: "hydro" } });
       return { ...model, station: msg.data };
     case "GetModels":
       getModels(model.ws);
@@ -87,11 +92,24 @@ export async function update(model, msg, dispatch) {
         default:
           return model;
       }
-    case "GetHydroData":
-      getHydroData(model.ws, msg.data);
+    case "GetData":
+      getData(model.ws, msg.data.station, msg.data.type);
       return { ...model, loading: true };
     case "GotHydroData":
+      dispatch({
+        type: "GetData",
+        data: { station: model.station, type: "weather" },
+      });
+      dispatch({
+        type: "GetData",
+        data: { station: model.station, type: "precipitation" },
+      });
       return { ...model, loading: false, hydroData: msg.data };
+    case "GotWeatherData":
+      return { ...model, loading: false, weatherData: msg.data };
+    case "GotPrecipitationData":
+      console.log("TEST");
+      return { ...model, loading: false, precipitationData: msg.data };
     default:
       return model;
   }
@@ -119,9 +137,11 @@ function handleMessage(event, dispatch, globalDispatch) {
     case "hydro_data":
       dispatch({ type: "GotHydroData", data: msg.data });
       break;
-    case "pet_data":
+    case "weather_data":
+      dispatch({ type: "GotWeatherData", data: msg.data });
       break;
-    case "snow_data":
+    case "precipitation_data":
+      dispatch({ type: "GotPrecipitationData", data: msg.data });
       break;
     default:
       break;
@@ -140,9 +160,11 @@ function updateModel(ws, type, val) {
   }
 }
 
-function getHydroData(ws, station) {
+function getData(ws, station, type) {
   if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "hydro_data", data: { station: station } }));
+    ws.send(
+      JSON.stringify({ type: `${type}_data`, data: { station: station } }),
+    );
   }
 }
 
@@ -165,6 +187,8 @@ export function view(model, dispatch) {
   loadingView(model);
   formView(model);
   dataView(model.hydroData, "discharge");
+  dataView(model.weatherData, "temperature");
+  dataView(model.precipitationData, "precipitation");
 }
 
 function openView(model) {
