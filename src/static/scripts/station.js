@@ -1,4 +1,10 @@
-import { create, createSlider, createLoading, clear } from "./utils.js";
+import {
+  create,
+  createSlider,
+  createLoading,
+  clear,
+} from "./utils/elements.js";
+import { connect } from "./utils/ws.js";
 
 /*********/
 /* model */
@@ -8,8 +14,8 @@ export function initModel() {
   return {
     loading: false,
     open: false,
-    map: null,
     ws: null,
+    map: null,
     stations: null,
     currentStation: window.localStorage.getItem("current-station")
       ? {
@@ -44,13 +50,8 @@ export async function update(model, msg, dispatch) {
         dispatch({ type: "CreateMap" });
       }
       return { ...model, open: open };
-    case "CreateMap":
-      createMap(dispatch);
-      return { ...model, loading: true };
-    case "CreatedMap":
-      return { ...model, loading: false, map: msg.data };
     case "Connect":
-      connect(dispatch, globalDispatch);
+      connect("station/", handleMessage, dispatch, globalDispatch);
       return { ...model, loading: true };
     case "Connected":
       if (model.stations === null) {
@@ -60,6 +61,11 @@ export async function update(model, msg, dispatch) {
     case "Disconnected":
       setTimeout(() => dispatch({ type: "Connect" }), 3000);
       return { ...model, ws: null };
+    case "CreateMap":
+      createMap(dispatch);
+      return { ...model, loading: true };
+    case "CreatedMap":
+      return { ...model, loading: false, map: msg.data };
     case "GetStations":
       getStations(model.ws);
       return model;
@@ -99,34 +105,13 @@ function createDispatch(dispatch) {
 }
 
 async function createMap(dispatch) {
-  const mapDiv = document.getElementById("main-station__map");
+  const mapDiv = document.getElementById("station-main__map");
   const map = L.map(mapDiv);
   const resizeObserver = new ResizeObserver(() =>
     setTimeout(() => map.invalidateSize(), 300),
   );
   resizeObserver.observe(mapDiv);
   dispatch({ type: "CreatedMap", data: map });
-}
-
-function connect(dispatch, globalDispatch) {
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${protocol}//${window.location.host}/station/`);
-
-  ws.onopen = () => {
-    dispatch({ type: "Connected", data: ws });
-  };
-  ws.onmessage = (event) => {
-    handleMessage(event, dispatch, globalDispatch);
-  };
-  ws.onclose = () => {
-    dispatch({ type: "Disconnected" });
-  };
-  ws.onerror = (error) => {
-    globalDispatch({
-      type: "AddNotification",
-      data: { text: `WebSocket error : ${error}`, isError: true },
-    });
-  };
 }
 
 function handleMessage(event, dispatch, globalDispatch) {
@@ -195,22 +180,22 @@ export function view(model, dispatch) {
 
 function openView(model) {
   if (model.open) {
-    document.getElementById("meta-station").classList.add("open");
-    document.getElementById("main-station").classList.add("open");
+    document.getElementById("station-meta").classList.add("open");
+    document.getElementById("station-main").classList.add("open");
   } else {
-    document.getElementById("meta-station").classList.remove("open");
-    document.getElementById("main-station").classList.remove("open");
+    document.getElementById("station-meta").classList.remove("open");
+    document.getElementById("station-main").classList.remove("open");
   }
 }
 
 function loadingView(model) {
   if (model.loading) {
     document
-      .querySelector("#main-station > .loading")
+      .querySelector("#station-main > .loading")
       .removeAttribute("hidden");
   } else {
     document
-      .querySelector("#main-station > .loading")
+      .querySelector("#station-main > .loading")
       .setAttribute("hidden", true);
   }
 }
@@ -219,7 +204,7 @@ function initMetaView(model, globalDispatch) {
   document.getElementById("meta").appendChild(
     create(
       "div",
-      { id: "meta-station", class: model.open ? "open" : "" },
+      { id: "station-meta", class: model.open ? "open" : "" },
       [
         create("h2", {}, ["Station"]),
         create("span", { id: "station__station" }, []),
@@ -239,7 +224,7 @@ function initMetaView(model, globalDispatch) {
 
 function initMainView(model, dispatch) {
   document.getElementById("main").appendChild(
-    create("section", { id: "main-station", class: model.open ? "open" : "" }, [
+    create("section", { id: "station-main", class: model.open ? "open" : "" }, [
       create(
         "button",
         { class: "close" },
@@ -279,7 +264,7 @@ function initMainView(model, dispatch) {
           10,
         ),
       ]),
-      create("div", { id: "main-station__map", hidden: true }),
+      create("div", { id: "station-main__map", hidden: true }),
       createLoading(),
     ]),
   );
@@ -304,7 +289,7 @@ function initMapView(map) {
       maxZoom: 12,
     }).addTo(map);
   }
-  document.getElementById("main-station__map").removeAttribute("hidden");
+  document.getElementById("station-main__map").removeAttribute("hidden");
 }
 
 function mapView(model, dispatch) {

@@ -1,6 +1,10 @@
-#main-station {
-  position: relative;
+#station-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
 
+#station-main {
   & form {
     align-items: center;
     background: oklch(var(--bg-dark) / 0.75);
@@ -69,9 +73,10 @@
     }
   }
 
-  & #main-station__map {
+  & #station-main__map {
     height: 100%;
     width: 100%;
+    border-radius: 0.5em;
     z-index: 0;
 
     & .leaflet-control-container,

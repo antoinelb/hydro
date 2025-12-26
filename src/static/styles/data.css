@@ -1,0 +1,108 @@
+#data-meta {
+  display: grid;
+  grid-column-gap: 0.5em;
+  grid-row-gap: 0.25em;
+  grid-template-columns: max-content 1fr;
+
+  & h2 {
+    grid-column: 1 / -1;
+  }
+
+  & span {
+    &.disabled {
+      color: oklch(var(--fg) / 0.5);
+    }
+  }
+}
+
+#data-meta span:nth-of-type(odd) {
+  justify-self: start;
+}
+#data-meta span:nth-of-type(even) {
+  justify-self: end;
+}
+
+#data-main {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 1em;
+
+  & form {
+    background: oklch(var(--fg) / 0.1);
+    border-radius: 0.5em;
+    display: flex;
+    justify-content: space-between;
+    left: calc(50% - 20em);
+    padding: 0.5em 1em;
+    position: relative;
+    top: 0.5em;
+    width: 40em;
+
+    & label {
+      align-items: center;
+      display: flex;
+      gap: 0.5em;
+
+      & select {
+        background: none;
+        border: none;
+        border-bottom: 1px solid oklch(var(--theme) / 0.75);
+        border-radius: 0;
+        box-shadow: none;
+
+        &:focus {
+          border: none;
+          border-bottom: 1px solid oklch(var(--theme));
+          outline: none;
+        }
+
+        & option {
+          background: oklch(var(--bg));
+          color: oklch(var(--fg));
+        }
+      }
+    }
+  }
+
+  & .plot {
+    & path {
+      fill: none;
+      stroke: oklch(var(--fg));
+      stroke-width: 0.5px;
+
+      &.path-red {
+        stroke: red;
+        stroke-width: 1px;
+      }
+
+      &.path-area {
+        fill: oklch(var(--fg) / 0.1);
+        stroke: none;
+      }
+    }
+    & text {
+      fill: oklch(var(--fg));
+    }
+
+    & .legend-item {
+      fill: oklch(var(--fg));
+      font-size: 0.8rem;
+
+      & line {
+        fill: none;
+        stroke: oklch(var(--fg));
+
+        &.path-red {
+          stroke: red;
+          stroke-width: 1px;
+        }
+      }
+      & rect {
+        fill: none;
+        fill: oklch(var(--fg) / 0.1);
+        stroke: none;
+      }
+    }
+  }
+}

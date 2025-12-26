@@ -1,0 +1,477 @@
+import { create, createLoading, clear } from "./utils/elements.js";
+import { connect } from "./utils/ws.js";
+import { toTitle, formatNumber } from "./utils/misc.js";
+
+/*********/
+/* model */
+/*********/
+
+export function initModel() {
+  return {
+    loading: false,
+    open: true,
+    ws: null,
+    station: null,
+    petModels: null,
+    snowModels: null,
+    petModel: window.localStorage.getItem("pet_model") || "odin",
+    snowModel:
+      window.localStorage.getItem("snow_model") === "null"
+        ? null
+        : window.localStorage.getItem("snow_model"),
+    hydroData: null,
+  };
+}
+
+export const initialMsg = [
+  {
+    type: "DataMsg",
+    data: { type: "Connect" },
+  },
+];
+
+/**********/
+/* update */
+/**********/
+
+export async function update(model, msg, dispatch) {
+  const globalDispatch = dispatch;
+  dispatch = createDispatch(dispatch);
+  switch (msg.type) {
+    case "CheckEscape":
+      return model;
+    case "SelectSection":
+      const open = msg.data === "data";
+      if (open && model.map === null) {
+        dispatch({ type: "CreateMap" });
+      }
+      return { ...model, open: open };
+    case "Connect":
+      connect("data/", handleMessage, dispatch, globalDispatch);
+      return { ...model, loading: true };
+    case "Connected":
+      if (model.petModels === null || model.snowModels === null) {
+        dispatch({ type: "GetModels" });
+      }
+      if (model.station !== null && model.hydroData === null) {
+        dispatch({ type: "GetHydroData", data: model.station });
+      }
+      return { ...model, loading: false, ws: msg.data };
+    case "Disconnected":
+      setTimeout(() => dispatch({ type: "Connect" }), 3000);
+      return { ...model, ws: null };
+    case "UpdateStation":
+      dispatch({ type: "GetHydroData", data: msg.data });
+      return { ...model, station: msg.data };
+    case "GetModels":
+      getModels(model.ws);
+      return { ...model, loading: true };
+    case "GotModels":
+      return {
+        ...model,
+        loading: false,
+        petModels: msg.data.pet,
+        snowModels: msg.data.snow,
+      };
+    case "UpdateModel":
+      updateModel(model.ws, msg.data.type, msg.data.val);
+      return model;
+    case "UpdatedModel":
+      switch (msg.data.type) {
+        case "pet":
+          window.localStorage.setItem("pet_model", msg.data.val);
+          return { ...model, petModel: msg.data.val };
+        case "snow":
+          window.localStorage.setItem("snow_model", msg.data.val);
+          return { ...model, snowModel: msg.data.val };
+        default:
+          return model;
+      }
+    case "GetHydroData":
+      getHydroData(model.ws, msg.data);
+      return { ...model, loading: true };
+    case "GotHydroData":
+      return { ...model, loading: false, hydroData: msg.data };
+    default:
+      return model;
+  }
+}
+
+function createDispatch(dispatch) {
+  return (msg) => dispatch({ type: "DataMsg", data: msg });
+}
+
+function handleMessage(event, dispatch, globalDispatch) {
+  const msg = JSON.parse(event.data);
+  switch (msg.type) {
+    case "error":
+      globalDispatch({
+        type: "AddNotification",
+        data: { text: msg.data, isError: true },
+      });
+      break;
+    case "models":
+      dispatch({ type: "GotModels", data: msg.data });
+      break;
+    case "model":
+      dispatch({ type: "UpdatedModel", data: msg.data });
+      break;
+    case "hydro_data":
+      dispatch({ type: "GotHydroData", data: msg.data });
+      break;
+    case "pet_data":
+      break;
+    case "snow_data":
+      break;
+    default:
+      break;
+  }
+}
+
+function getModels(ws) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "models" }));
+  }
+}
+
+function updateModel(ws, type, val) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "model", data: { type: type, val: val } }));
+  }
+}
+
+function getHydroData(ws, station) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "hydro_data", data: { station: station } }));
+  }
+}
+
+/********/
+/* view */
+/********/
+
+export function initView(model, dispatch) {
+  const globalDispatch = dispatch;
+  dispatch = createDispatch(dispatch);
+  initMetaView(model, globalDispatch);
+  initMainView(model, dispatch);
+}
+
+export function view(model, dispatch) {
+  dispatch = createDispatch(dispatch);
+
+  openView(model);
+  metaView(model);
+  loadingView(model);
+  formView(model);
+  dataView(model.hydroData, "discharge");
+}
+
+function openView(model) {
+  if (model.open) {
+    document.getElementById("data-meta").classList.add("open");
+    document.getElementById("data-main").classList.add("open");
+  } else {
+    document.getElementById("data-meta").classList.remove("open");
+    document.getElementById("data-main").classList.remove("open");
+  }
+}
+
+function loadingView(model) {
+  if (model.loading) {
+    document.querySelector("#data-main > .loading").removeAttribute("hidden");
+  } else {
+    document
+      .querySelector("#data-main > .loading")
+      .setAttribute("hidden", true);
+  }
+}
+
+function initMetaView(model, globalDispatch) {
+  document.getElementById("meta").appendChild(
+    create(
+      "div",
+      { id: "data-meta", class: model.open ? "open" : "" },
+      [
+        create("h2", {}, ["Données"]),
+        create(
+          "span",
+          { class: "data__pet" },
+          "Modèle d'évapotranspiration potentielle:",
+        ),
+        create("span", { id: "data__pet", class: "data__pet" }, []),
+        create("span", { class: "data__snow" }, "Modèle de neige:"),
+        create("span", { id: "data__snow", class: "data__snow" }, []),
+      ],
+      [
+        {
+          event: "click",
+          fct: () => {
+            globalDispatch({ type: "SelectSection", data: "data" });
+          },
+        },
+      ],
+    ),
+  );
+}
+
+function initMainView(model, dispatch) {
+  document.getElementById("main").appendChild(
+    create("section", { id: "data-main", class: model.open ? "open" : "" }, [
+      create(
+        "button",
+        { class: "close" },
+        [
+          create("svg", { class: "icon" }, [
+            create("use", { href: "#icon-x" }),
+          ]),
+        ],
+        [
+          {
+            event: "click",
+            fct: () => dispatch({ type: "SelectSection" }),
+          },
+        ],
+      ),
+      createLoading(),
+      create("form", {}, [
+        create("label", { for: "data-selection__pet" }, [
+          "Modèle d'évapotranspiration potentielle:",
+          create(
+            "select",
+            { id: "data-selection__pet", hidden: true },
+            [],
+            [
+              {
+                event: "input",
+                fct: (event) => {
+                  dispatch({
+                    type: "UpdateModel",
+                    data: { type: "pet", val: event.target.value },
+                  });
+                },
+              },
+            ],
+          ),
+        ]),
+        create("label", { for: "data-selection__snow" }, [
+          "Modèle de neige:",
+          create(
+            "select",
+            { id: "data-selection__snow", hidden: true },
+            [],
+            [
+              {
+                event: "input",
+                fct: (event) => {
+                  dispatch({
+                    type: "UpdateModel",
+                    data: { type: "snow", val: event.target.value },
+                  });
+                },
+              },
+            ],
+          ),
+        ]),
+      ]),
+      create("svg", { id: "data-main__discharge", class: "plot" }),
+      create("svg", { id: "data-main__temperature", class: "plot" }),
+      create("svg", { id: "data-main__precipitation", class: "plot" }),
+    ]),
+  );
+}
+
+function metaView(model) {
+  if (model.petModel === null) {
+    document.getElementById("data__pet").textContent = "";
+    [...document.querySelectorAll(".data__pet")].forEach((span) =>
+      span.classList.add("disabled"),
+    );
+  } else {
+    document.getElementById("data__pet").textContent = toTitle(model.petModel);
+    [...document.querySelectorAll(".data__pet")].forEach((span) =>
+      span.classList.remove("disabled"),
+    );
+  }
+
+  if (model.snowModel === null || model.snowModel === "") {
+    document.getElementById("data__snow").textContent = "Aucun";
+    [...document.querySelectorAll(".data__snow")].forEach((span) =>
+      span.classList.add("disabled"),
+    );
+  } else {
+    document.getElementById("data__snow").textContent = toTitle(
+      model.snowModel,
+    );
+    [...document.querySelectorAll(".data__snow")].forEach((span) =>
+      span.classList.remove("disabled"),
+    );
+  }
+}
+
+function formView(model) {
+  const petSelect = document.getElementById("data-selection__pet");
+  const snowSelect = document.getElementById("data-selection__snow");
+
+  if (petSelect.children.length === 0 && model.petModels !== null) {
+    petSelect.removeAttribute("hidden");
+    model.petModels.forEach((_model) => {
+      const option = create("option", { value: _model }, [toTitle(_model)]);
+      option.selected = _model === model.petModel;
+      petSelect.appendChild(option);
+    });
+  }
+
+  if (snowSelect.children.length === 0 && model.snowModels !== null) {
+    snowSelect.removeAttribute("hidden");
+    model.snowModels.forEach((_model) => {
+      const option = create(
+        "option",
+        { value: _model === null ? "" : _model },
+        [_model === null ? "Aucun" : toTitle(_model)],
+      );
+      option.selected = _model === model.snowModel;
+      snowSelect.appendChild(option);
+    });
+  }
+}
+
+function dataView(data, feature) {
+  const _svg = document.getElementById(`data-main__${feature}`);
+  clear(_svg);
+  if (data === null) {
+    _svg.setAttribute("hidden", true);
+  } else {
+    _svg.removeAttribute("hidden");
+    const width = _svg.clientWidth;
+    const height = _svg.clientHeight;
+    _svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    const boundaries = {
+      l: 65,
+      r: width - 5,
+      t: 5,
+      b: height - 50,
+    };
+
+    const svg = d3.select(_svg);
+
+    const xScale = d3
+      .scaleTime()
+      .domain(d3.extent(data, (d) => new Date(d.date)))
+      .range([boundaries.l, boundaries.r]);
+    const yScale = d3
+      .scaleLinear()
+      .domain([
+        d3.min(data, (d) => d[`${feature}_min`]),
+        d3.max(data, (d) => d[`${feature}_max`]),
+      ])
+      .range([boundaries.b, boundaries.t]);
+
+    // x axis
+    svg
+      .append("g")
+      .attr("class", "x-axis")
+      .attr("transform", `translate(0, ${boundaries.b})`)
+      .call(d3.axisBottom(xScale))
+      .selectAll("text")
+      .attr("transform", "rotate(-45)")
+      .attr("text-anchor", "end")
+      .attr("dx", "-0.5em")
+      .attr("dy", "0.5em");
+    // y axis
+    svg
+      .append("g")
+      .attr("class", "y-axis")
+      .attr("transform", `translate(${boundaries.l}, 0)`)
+      .call(
+        d3
+          .axisLeft(yScale)
+          .ticks(5)
+          .tickFormat((x) => formatNumber(x)),
+      );
+    svg
+      .append("text")
+      .attr("x", -boundaries.b / 2)
+      .attr("y", height / 2)
+      .attr("dy", "-3em")
+      .attr("text-anchor", "middle")
+      .attr("transform", "rotate(-90)")
+      .attr("font-size", "0.9rem")
+      .text(toTitle(feature));
+
+    // current data
+    svg
+      .append("path")
+      .attr("class", "path-red")
+      .datum(data)
+      .attr(
+        "d",
+        d3
+          .line()
+          .x((d) => xScale(new Date(d.date)))
+          .y((d) => yScale(d[feature])),
+      );
+
+    // historical median and min-max range
+    svg
+      .append("path")
+      .datum(data)
+      .attr(
+        "d",
+        d3
+          .line()
+          .x((d) => xScale(new Date(d.date)))
+          .y((d) => yScale(d[`${feature}_median`])),
+      );
+    svg
+      .append("path")
+      .datum(data)
+      .attr("class", "path-area")
+      .attr(
+        "d",
+        d3
+          .area()
+          .x((d) => xScale(new Date(d.date)))
+          .y0((d) => yScale(d[`${feature}_min`]))
+          .y1((d) => yScale(d[`${feature}_max`])),
+      );
+
+    // legend
+    const legendData = [
+      { label: "Last year", class: "path-red", type: "line" },
+      { label: "Historic median", class: "", type: "line" },
+      { label: "Historic min-max range", class: "", type: "area" },
+    ];
+    const legend = svg
+      .append("g")
+      .attr("class", "legend")
+      .attr("transform", `translate(${boundaries.r - 110}, ${boundaries.t})`);
+    const legendItems = legend
+      .selectAll(".legend-item")
+      .data(legendData)
+      .enter()
+      .append("g")
+      .attr("class", "legend-item")
+      .attr("transform", (d, i) => `translate(0, ${i * 20})`);
+    legendItems
+      .filter((d) => d.type === "line")
+      .append("line")
+      .attr("class", (d) => d.class)
+      .attr("x1", 0)
+      .attr("x2", 15)
+      .attr("y1", 7)
+      .attr("y2", 7);
+    legendItems
+      .filter((d) => d.type === "area")
+      .append("rect")
+      .attr("class", (d) => d.class)
+      .attr("width", 15)
+      .attr("height", 15);
+    legendItems
+      .append("text")
+      .attr("x", 20)
+      .attr("y", 12)
+      .text((d) => d.label);
+  }
+}

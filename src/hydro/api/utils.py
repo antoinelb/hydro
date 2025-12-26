@@ -234,7 +234,9 @@ def convert_for_json(data: Any) -> Any:
                 pl.when(pl.col(NumericType).is_infinite())
                 .then(None)
                 .otherwise(pl.col(NumericType))
-                .name.keep()
+                .name.keep(),
+                pl.col(pl.Date).dt.strftime("%Y-%m-%d"),
+                pl.col(pl.Datetime).dt.strftime("%Y-%m-%d %H:%M:%S"),
             ).to_dicts()
         ]
     else:

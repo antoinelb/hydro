@@ -3,10 +3,11 @@
 @import "./settings.css";
 @import "./notifications.css";
 @import "./station.css";
+@import "./data.css";
 
 body {
   display: grid;
-  grid-template-rows: 8em 1fr;
+  grid-template-rows: max-content 1fr;
 }
 
 #meta {
@@ -25,7 +26,7 @@ body {
     padding: 0.5em 1em;
     text-align: center;
     transition: border 300ms;
-    width: 10em;
+    width: max-content;
 
     &.open {
       border: 1px solid oklch(var(--fg) / 0.5);
@@ -39,17 +40,22 @@ body {
 }
 
 #main {
-  height: 100%;
-  width: 100%;
+  height: calc(100% - 2em);
+  padding: 1em;
+  position: relative;
+  width: calc(100% - 2em);
 
   & section {
-    background: oklch(var(--fg) / 0.1);
-    height: 100%;
-    position: relative;
+    border: 1px solid oklch(var(--fg) / 0.5);
+    border-radius: 0.5em;
+    height: calc(100% - 2em);
+    left: 1em;
+    position: absolute;
+    top: 1em;
     transform: scale(0);
     transform-origin: center center;
     transition: transform 300ms;
-    width: 100%;
+    width: calc(100% - 2em);
 
     &.open {
       transform: scale(1);
@@ -68,7 +74,7 @@ body {
       position: absolute;
       right: 0.25em;
       top: 0.25em;
-      z-index: 1;
+      z-index: 3;
 
       &:hover {
         background: oklch(var(--fg) / 0.1);

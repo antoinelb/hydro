@@ -1,4 +1,5 @@
-import { create, onKey } from "./utils.js";
+import { create } from "./utils/elements.js";
+import { onKey } from "./utils/listeners.js";
 
 /*********/
 /* model */

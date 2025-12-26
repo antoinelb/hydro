@@ -1,8 +1,9 @@
-import { create } from "./utils.js";
+import { create } from "./utils/elements.js";
 
 import * as settings from "./settings.js";
 import * as notifications from "./notifications.js";
 import * as station from "./station.js";
+import * as data from "./data.js";
 
 /*********/
 /* model */
@@ -15,6 +16,7 @@ function initModel() {
     settings: settings.initModel(),
     notifications: notifications.initModel(),
     station: station.initModel(),
+    data: data.initModel(),
   };
 }
 
@@ -47,9 +49,27 @@ async function update(model, msg, dispatch) {
         ),
       };
     case "StationMsg":
+      const _station = await station.update(model.station, msg.data, dispatch);
+      if (
+        _station.currentStation !== null &&
+        _station.currentStation.station !== model.data.station
+      ) {
+        dispatch({
+          type: "DataMsg",
+          data: {
+            type: "UpdateStation",
+            data: _station.currentStation.station,
+          },
+        });
+      }
       return {
         ...model,
-        station: await station.update(model.station, msg.data, dispatch),
+        station: _station,
+      };
+    case "DataMsg":
+      return {
+        ...model,
+        data: await data.update(model.data, msg.data, dispatch),
       };
     default:
       return model;
@@ -62,15 +82,17 @@ function dispathCheckEscape(model, event, dispatch) {
       event.type === "click" ||
       (event.type === "keydown" && event.key === "Escape")
     ) {
-      ["SettingsMsg", "NotificationsMsg", "StationMsg"].forEach((msg) => {
-        dispatch({ type: msg, data: { type: "CheckEscape", data: event } });
-      });
+      ["SettingsMsg", "NotificationsMsg", "StationMsg", "DataMsg"].forEach(
+        (msg) => {
+          dispatch({ type: msg, data: { type: "CheckEscape", data: event } });
+        },
+      );
     }
   }
 }
 
 function dispatchSelectSection(section, dispatch) {
-  ["StationMsg"].forEach((msg) => {
+  ["StationMsg", "DataMsg"].forEach((msg) => {
     dispatch({ type: msg, data: { type: "SelectSection", data: section } });
   });
 }
@@ -88,6 +110,7 @@ async function initView(model, dispatch) {
     create("main", { id: "main" }),
   );
   station.initView(model.station, dispatch);
+  data.initView(model.data, dispatch);
   document.body.addEventListener("click", (event) =>
     dispatch({ type: "CheckEscape", data: event }),
   );
@@ -115,6 +138,9 @@ function view(msg, model, dispatch) {
     case "StationMsg":
       station.view(model.station, dispatch);
       break;
+    case "DataMsg":
+      data.view(model.data, dispatch);
+      break;
   }
   loadingView(model);
 }
@@ -124,7 +150,8 @@ function loadingView(model) {
     model.loading ||
     model.settings.loading ||
     model.notifications.loading ||
-    model.station.loading;
+    model.station.loading ||
+    model.data.loading;
   if (loading) {
     if (
       document.querySelector("link[rel~='icon']").href !==
@@ -178,6 +205,7 @@ async function init() {
     settings.initialMsg,
     notifications.initialMsg,
     station.initialMsg,
+    data.initialMsg,
   ].forEach((msg) => {
     if (msg) {
       if (Array.isArray(msg)) {
