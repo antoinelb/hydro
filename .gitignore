@@ -10,4 +10,11 @@ wheels/
 .venv
 .env
 
+# Rust-generated files
+target/
+
 /data
+
+# Claude
+CLAUDE.md
+.claude

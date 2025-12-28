@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "httpx>=0.28.1",
+    "hydro-rs",
     "polars>=1.36.1",
     "pyproj>=3.7.2",
     "starlette>=0.50.0",
@@ -17,9 +18,13 @@ dependencies = [
 dev = [
     "black>=25.11.0",
     "isort>=7.0.0",
+    "maturin>=1.10.2",
     "ruff>=0.14.8",
     "ty>=0.0.1a32",
 ]
+
+[tool.uv.sources]
+hydro-rs = { path = "./src/hydro-rs", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.8.4"]
