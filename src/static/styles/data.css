@@ -23,15 +23,17 @@
 }
 
 #data-main {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
+  display: grid;
   gap: 1em;
+  grid-template-rows: max-content 1fr;
+  height: 100%;
+  width: 100%;
 
   & form {
     background: oklch(var(--fg) / 0.1);
     border-radius: 0.5em;
     display: flex;
+    gap: 3em;
     justify-content: space-between;
     left: calc(50% - 20em);
     padding: 0.5em 1em;
@@ -43,6 +45,8 @@
       align-items: center;
       display: flex;
       gap: 0.5em;
+      justify-content: space-around;
+      width: min-content;
 
       & select {
         background: none;
@@ -62,46 +66,63 @@
           color: oklch(var(--fg));
         }
       }
+
+      & input {
+        padding: 0 0.25em;
+        width: 2em;
+      }
     }
   }
 
-  & .plot {
-    & path {
-      fill: none;
-      stroke: oklch(var(--fg));
-      stroke-width: 0.5px;
+  & #data-main__plots {
+    display: grid;
+    grid-template-rows: 30% 30% 40%;
+    height: 100%;
+    min-height: 0;
 
-      &.path-red {
-        stroke: red;
-        stroke-width: 1px;
-      }
+    & .plot {
+      display: block;
+      height: 100%;
+      min-height: 0;
+      width: 100%;
 
-      &.path-area {
-        fill: oklch(var(--fg) / 0.1);
-        stroke: none;
-      }
-    }
-    & text {
-      fill: oklch(var(--fg));
-    }
-
-    & .legend-item {
-      fill: oklch(var(--fg));
-      font-size: 0.8rem;
-
-      & line {
+      & path {
         fill: none;
         stroke: oklch(var(--fg));
+        stroke-width: 0.5px;
 
         &.path-red {
           stroke: red;
           stroke-width: 1px;
         }
+
+        &.path-area {
+          fill: oklch(var(--fg) / 0.1);
+          stroke: none;
+        }
       }
-      & rect {
-        fill: none;
-        fill: oklch(var(--fg) / 0.1);
-        stroke: none;
+      & text {
+        fill: oklch(var(--fg));
+      }
+
+      & .legend-item {
+        fill: oklch(var(--fg));
+        font-size: 0.8rem;
+
+        & line {
+          fill: none;
+          stroke: oklch(var(--fg));
+
+          &.path-red {
+            stroke: red;
+            stroke-width: 1px;
+          }
+        }
+        & rect {
+          fill: none;
+          fill: oklch(var(--fg) / 0.1);
+          stroke: none;
+        }
       }
     }
   }

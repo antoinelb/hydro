@@ -1,6 +1,6 @@
 import { create, createLoading, clear } from "./utils/elements.js";
 import { connect } from "./utils/ws.js";
-import { toTitle, formatNumber } from "./utils/misc.js";
+import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
 
 /*********/
 /* model */
@@ -19,6 +19,7 @@ export function initModel() {
       window.localStorage.getItem("snow_model") === "null"
         ? null
         : window.localStorage.getItem("snow_model"),
+    nValYears: parseInt(window.localStorage.getItem("n_val_years") || "5"),
     hydroData: null,
     weatherData: null,
     precipitationData: null,
@@ -36,8 +37,7 @@ export const initialMsg = [
 /* update */
 /**********/
 
-export async function update(model, msg, dispatch) {
-  const globalDispatch = dispatch;
+export async function update(model, msg, dispatch, createNotification) {
   dispatch = createDispatch(dispatch);
   switch (msg.type) {
     case "CheckEscape":
@@ -49,7 +49,7 @@ export async function update(model, msg, dispatch) {
       }
       return { ...model, open: open };
     case "Connect":
-      connect("data/", handleMessage, dispatch, globalDispatch);
+      connect("data/", handleMessage, dispatch, createNotification);
       return { ...model, loading: true };
     case "Connected":
       if (model.petModels === null || model.snowModels === null) {
@@ -92,6 +92,12 @@ export async function update(model, msg, dispatch) {
         default:
           return model;
       }
+    case "UpdateValidationYears":
+      updateValidationYears(model.ws, msg.data);
+      return model;
+    case "UpdatedValidationYears":
+      window.localStorage.setItem("n_val_years", msg.data.toString());
+      return { ...model, nValYears: msg.data };
     case "GetData":
       getData(model.ws, msg.data.station, msg.data.type);
       return { ...model, loading: true };
@@ -119,20 +125,21 @@ function createDispatch(dispatch) {
   return (msg) => dispatch({ type: "DataMsg", data: msg });
 }
 
-function handleMessage(event, dispatch, globalDispatch) {
+function handleMessage(event, dispatch, createNotification) {
   const msg = JSON.parse(event.data);
   switch (msg.type) {
     case "error":
-      globalDispatch({
-        type: "AddNotification",
-        data: { text: msg.data, isError: true },
-      });
+      createNotification(msg.data, true);
       break;
     case "models":
       dispatch({ type: "GotModels", data: msg.data });
       break;
     case "model":
       dispatch({ type: "UpdatedModel", data: msg.data });
+      break;
+    case "validation_years":
+      console.log("TEST");
+      dispatch({ type: "UpdatedValidationYears", data: msg.data });
       break;
     case "hydro_data":
       dispatch({ type: "GotHydroData", data: msg.data });
@@ -144,6 +151,7 @@ function handleMessage(event, dispatch, globalDispatch) {
       dispatch({ type: "GotPrecipitationData", data: msg.data });
       break;
     default:
+      createNotification("Unknown websocket message", true);
       break;
   }
 }
@@ -157,6 +165,12 @@ function getModels(ws) {
 function updateModel(ws, type, val) {
   if (ws?.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "model", data: { type: type, val: val } }));
+  }
+}
+
+function updateValidationYears(ws, val) {
+  if (ws?.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "validation_years", data: parseInt(val) }));
   }
 }
 
@@ -186,9 +200,9 @@ export function view(model, dispatch) {
   metaView(model);
   loadingView(model);
   formView(model);
-  dataView(model.hydroData, "discharge");
-  dataView(model.weatherData, "temperature");
-  dataView(model.precipitationData, "precipitation");
+  dataView(model.hydroData, "discharge", false, true);
+  dataView(model.weatherData, "temperature", false, false);
+  dataView(model.precipitationData, "precipitation", true, false);
 }
 
 function openView(model) {
@@ -226,6 +240,8 @@ function initMetaView(model, globalDispatch) {
         create("span", { id: "data__pet", class: "data__pet" }, []),
         create("span", { class: "data__snow" }, "Modèle de neige:"),
         create("span", { id: "data__snow", class: "data__snow" }, []),
+        create("span", {}, "Nombre d'années de validation:"),
+        create("span", { id: "data__val-years" }, []),
       ],
       [
         {
@@ -258,49 +274,80 @@ function initMainView(model, dispatch) {
         ],
       ),
       createLoading(),
-      create("form", {}, [
-        create("label", { for: "data-selection__pet" }, [
-          "Modèle d'évapotranspiration potentielle:",
-          create(
-            "select",
-            { id: "data-selection__pet", hidden: true },
-            [],
-            [
-              {
-                event: "input",
-                fct: (event) => {
-                  dispatch({
-                    type: "UpdateModel",
-                    data: { type: "pet", val: event.target.value },
-                  });
+      create(
+        "form",
+        {},
+        [
+          create("label", { for: "data-selection__pet" }, [
+            "Évapotranspiration potentielle",
+            create(
+              "select",
+              { id: "data-selection__pet", hidden: true },
+              [],
+              [
+                {
+                  event: "input",
+                  fct: (event) => {
+                    dispatch({
+                      type: "UpdateModel",
+                      data: { type: "pet", val: event.target.value },
+                    });
+                  },
                 },
-              },
-            ],
-          ),
-        ]),
-        create("label", { for: "data-selection__snow" }, [
-          "Modèle de neige:",
-          create(
-            "select",
-            { id: "data-selection__snow", hidden: true },
-            [],
-            [
-              {
-                event: "input",
-                fct: (event) => {
-                  dispatch({
-                    type: "UpdateModel",
-                    data: { type: "snow", val: event.target.value },
-                  });
+              ],
+            ),
+          ]),
+          create("label", { for: "data-selection__snow" }, [
+            "Neige",
+            create(
+              "select",
+              { id: "data-selection__snow", hidden: true },
+              [],
+              [
+                {
+                  event: "input",
+                  fct: (event) => {
+                    dispatch({
+                      type: "UpdateModel",
+                      data: { type: "snow", val: event.target.value },
+                    });
+                  },
                 },
+              ],
+            ),
+          ]),
+          create("label", { for: "data-selection__val-years" }, [
+            "Années validation",
+            create(
+              "input",
+              {
+                id: "data-selection__val-years",
+                type: "number",
+                value: model.nValYears.toString(),
+                min: "0",
               },
-            ],
-          ),
-        ]),
+              [],
+              [
+                {
+                  event: "input",
+                  fct: (event) => {
+                    dispatch({
+                      type: "UpdateValidationYears",
+                      data: event.target.value,
+                    });
+                  },
+                },
+              ],
+            ),
+          ]),
+        ],
+        [{ event: "submit", fct: (event) => event.preventDefault() }],
+      ),
+      create("div", { id: "data-main__plots" }, [
+        create("svg", { id: "data-main__discharge", class: "plot" }),
+        create("svg", { id: "data-main__temperature", class: "plot" }),
+        create("svg", { id: "data-main__precipitation", class: "plot" }),
       ]),
-      create("svg", { id: "data-main__discharge", class: "plot" }),
-      create("svg", { id: "data-main__temperature", class: "plot" }),
-      create("svg", { id: "data-main__precipitation", class: "plot" }),
     ]),
   );
 }
@@ -331,6 +378,8 @@ function metaView(model) {
       span.classList.remove("disabled"),
     );
   }
+
+  document.getElementById("data__val-years").textContent = model.nValYears;
 }
 
 function formView(model) {
@@ -360,7 +409,12 @@ function formView(model) {
   }
 }
 
-function dataView(data, feature) {
+function dataView(data, feature, showXLabels = false, showLegend = false) {
+  const translateFeature = {
+    discharge: "débit",
+    temperature: "température",
+    precipitation: "précipitation",
+  };
   const _svg = document.getElementById(`data-main__${feature}`);
   clear(_svg);
   if (data === null) {
@@ -372,10 +426,10 @@ function dataView(data, feature) {
     _svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
     const boundaries = {
-      l: 65,
-      r: width - 5,
+      l: 50,
+      r: width - 25,
       t: 5,
-      b: height - 50,
+      b: height - (showXLabels ? 50 : 10),
     };
 
     const svg = d3.select(_svg);
@@ -393,16 +447,21 @@ function dataView(data, feature) {
       .range([boundaries.b, boundaries.t]);
 
     // x axis
-    svg
+    const xAxis = svg
       .append("g")
       .attr("class", "x-axis")
       .attr("transform", `translate(0, ${boundaries.b})`)
-      .call(d3.axisBottom(xScale))
-      .selectAll("text")
-      .attr("transform", "rotate(-45)")
-      .attr("text-anchor", "end")
-      .attr("dx", "-0.5em")
-      .attr("dy", "0.5em");
+      .call(d3.axisBottom(xScale).tickFormat(frenchLocale.format("%B")));
+    if (showXLabels) {
+      xAxis
+        .selectAll("text")
+        .attr("transform", "rotate(-45)")
+        .attr("text-anchor", "end")
+        .attr("dx", "-0.5em")
+        .attr("dy", "0.5em");
+    } else {
+      xAxis.selectAll("text").remove();
+    }
     // y axis
     svg
       .append("g")
@@ -416,13 +475,16 @@ function dataView(data, feature) {
       );
     svg
       .append("text")
-      .attr("x", -boundaries.b / 2)
-      .attr("y", height / 2)
-      .attr("dy", "-3em")
+      .attr("x", 15)
+      .attr("y", (boundaries.t + boundaries.b) / 2)
       .attr("text-anchor", "middle")
-      .attr("transform", "rotate(-90)")
+      .attr("dominant-baseline", "middle")
+      .attr(
+        "transform",
+        `rotate(-90, 15, ${(boundaries.t + boundaries.b) / 2})`,
+      )
       .attr("font-size", "0.9rem")
-      .text(toTitle(feature));
+      .text(toTitle(translateFeature[feature]));
 
     // current data
     svg
@@ -462,40 +524,42 @@ function dataView(data, feature) {
       );
 
     // legend
-    const legendData = [
-      { label: "Last year", class: "path-red", type: "line" },
-      { label: "Historic median", class: "", type: "line" },
-      { label: "Historic min-max range", class: "", type: "area" },
-    ];
-    const legend = svg
-      .append("g")
-      .attr("class", "legend")
-      .attr("transform", `translate(${boundaries.r - 110}, ${boundaries.t})`);
-    const legendItems = legend
-      .selectAll(".legend-item")
-      .data(legendData)
-      .enter()
-      .append("g")
-      .attr("class", "legend-item")
-      .attr("transform", (d, i) => `translate(0, ${i * 20})`);
-    legendItems
-      .filter((d) => d.type === "line")
-      .append("line")
-      .attr("class", (d) => d.class)
-      .attr("x1", 0)
-      .attr("x2", 15)
-      .attr("y1", 7)
-      .attr("y2", 7);
-    legendItems
-      .filter((d) => d.type === "area")
-      .append("rect")
-      .attr("class", (d) => d.class)
-      .attr("width", 15)
-      .attr("height", 15);
-    legendItems
-      .append("text")
-      .attr("x", 20)
-      .attr("y", 12)
-      .text((d) => d.label);
+    if (showLegend) {
+      const legendData = [
+        { label: "Dernière année", class: "path-red", type: "line" },
+        { label: "Médiane historique", class: "", type: "line" },
+        { label: "Écart min-max historique", class: "", type: "area" },
+      ];
+      const legend = svg
+        .append("g")
+        .attr("class", "legend")
+        .attr("transform", `translate(${boundaries.r - 150}, ${boundaries.t})`);
+      const legendItems = legend
+        .selectAll(".legend-item")
+        .data(legendData)
+        .enter()
+        .append("g")
+        .attr("class", "legend-item")
+        .attr("transform", (d, i) => `translate(0, ${i * 20})`);
+      legendItems
+        .filter((d) => d.type === "line")
+        .append("line")
+        .attr("class", (d) => d.class)
+        .attr("x1", 0)
+        .attr("x2", 15)
+        .attr("y1", 7)
+        .attr("y2", 7);
+      legendItems
+        .filter((d) => d.type === "area")
+        .append("rect")
+        .attr("class", (d) => d.class)
+        .attr("width", 15)
+        .attr("height", 15);
+      legendItems
+        .append("text")
+        .attr("x", 20)
+        .attr("y", 12)
+        .text((d) => d.label);
+    }
   }
 }

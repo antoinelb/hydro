@@ -29,6 +29,8 @@ export const {
   select,
   selectAll,
   selection,
+  timeMonth,
+  timeYear,
   zoom,
   zoomIdentity,
 } = window.d3 || {};

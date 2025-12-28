@@ -27,6 +27,12 @@ const initialMsg = null;
 /**********/
 
 async function update(model, msg, dispatch) {
+  const createNotification = (text, isError) => {
+    dispatch({
+      type: "NotificationsMsg",
+      data: { type: "AddNotification", data: { text: text, isError: isError } },
+    });
+  };
   switch (msg.type) {
     case "CheckEscape":
       dispathCheckEscape(model, msg.data, dispatch);
@@ -49,7 +55,12 @@ async function update(model, msg, dispatch) {
         ),
       };
     case "StationMsg":
-      const _station = await station.update(model.station, msg.data, dispatch);
+      const _station = await station.update(
+        model.station,
+        msg.data,
+        dispatch,
+        createNotification,
+      );
       if (
         _station.currentStation !== null &&
         _station.currentStation.station !== model.data.station
@@ -69,7 +80,12 @@ async function update(model, msg, dispatch) {
     case "DataMsg":
       return {
         ...model,
-        data: await data.update(model.data, msg.data, dispatch),
+        data: await data.update(
+          model.data,
+          msg.data,
+          dispatch,
+          createNotification,
+        ),
       };
     default:
       return model;

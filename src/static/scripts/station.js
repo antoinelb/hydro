@@ -38,8 +38,7 @@ export const initialMsg = [
 /* update */
 /**********/
 
-export async function update(model, msg, dispatch) {
-  const globalDispatch = dispatch;
+export async function update(model, msg, dispatch, createNotification) {
   dispatch = createDispatch(dispatch);
   switch (msg.type) {
     case "CheckEscape":
@@ -51,7 +50,7 @@ export async function update(model, msg, dispatch) {
       }
       return { ...model, open: open };
     case "Connect":
-      connect("station/", handleMessage, dispatch, globalDispatch);
+      connect("station/", handleMessage, dispatch, createNotification);
       return { ...model, loading: true };
     case "Connected":
       if (model.stations === null) {
@@ -114,14 +113,11 @@ async function createMap(dispatch) {
   dispatch({ type: "CreatedMap", data: map });
 }
 
-function handleMessage(event, dispatch, globalDispatch) {
+function handleMessage(event, dispatch, createNotification) {
   const msg = JSON.parse(event.data);
   switch (msg.type) {
     case "error":
-      globalDispatch({
-        type: "AddNotification",
-        data: { text: msg.data, isError: true },
-      });
+      createNotification(msg.data, true);
       break;
     case "stations":
       dispatch({ type: "GotStations", data: msg.data });

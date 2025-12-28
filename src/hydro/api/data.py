@@ -17,6 +17,7 @@ from .utils import convert_for_json
 class Data(TypedDict):
     pet_model: str | None
     snow_model: str | None
+    validation_years: int | None
     hydro_data: pl.DataFrame | None
     weather_data: pl.DataFrame | None
     precipitation_data: pl.DataFrame | None
@@ -47,6 +48,7 @@ async def _websocket_handler(ws: WebSocket) -> None:
     data = {
         "pet_model": None,
         "snow_model": None,
+        "validation_years": None,
         "hydro_data": None,
         "weather_data": None,
         "precipitation_data": None,
@@ -69,6 +71,10 @@ async def _handle_message(
             return await _handle_models_message(ws, data)
         case "model":
             return await _handle_model_message(ws, msg.get("data", {}), data)
+        case "validation_years":
+            return await _handle_validation_years_message(
+                ws, msg.get("data", None), data
+            )
         case "hydro_data":
             return await _handle_hydro_data_message(
                 ws, msg.get("data", {}), data
@@ -112,6 +118,20 @@ async def _handle_model_message(
         case _:
             await _send(ws, "error", "The only valid types are pet and snow.")
             return data
+
+
+async def _handle_validation_years_message(
+    ws: WebSocket, msg_data: int | None, data: Data
+) -> Data:
+    if msg_data is None:
+        await _send(
+            ws, "error", "The number of validation years must be an integer."
+        )
+        return data
+
+    await _send(ws, "validation_years", msg_data)
+
+    return {**data, "validation_years": msg_data}
 
 
 async def _handle_hydro_data_message(
