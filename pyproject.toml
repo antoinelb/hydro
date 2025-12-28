@@ -33,6 +33,7 @@ build-backend = "uv_build"
 [project.scripts]
 hydro = "hydro.main:run_server"
 h = "hydro.main:run_server"
+build-rs = "hydro.scripts:build_rs"
 
 [tool.black]
 line_length = 79

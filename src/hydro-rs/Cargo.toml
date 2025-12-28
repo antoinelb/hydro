@@ -1,7 +1,7 @@
 [package]
 name = "hydro-rs"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 numpy = "0.27.1"
@@ -10,3 +10,6 @@ pyo3 = { version = "0.27.2", features = ["extension-module"] }
 [lib]
 name = "hydro_rs"
 crate-type = ["cdylib"]
+
+[lints.rust]
+non_upper_case_globals = "allow"

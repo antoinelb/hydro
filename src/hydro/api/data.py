@@ -1,6 +1,7 @@
 from typing import Any, TypedDict
 
 import polars as pl
+from hydro_rs import pet, snow
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
@@ -23,9 +24,6 @@ class Data(TypedDict):
     precipitation_data: pl.DataFrame | None
     pet_data: pl.DataFrame | None
 
-
-PetModels = ["oudin"]
-SnowModels = [None, "cemaneige"]
 
 ##########
 # public #
@@ -90,7 +88,7 @@ async def _handle_message(
 
 
 async def _handle_models_message(ws: WebSocket, data: Data) -> Data:
-    models = {"pet": ["oudin"], "snow": ["cemaneige", None]}
+    models = {"pet": pet.Models, "snow": ["cemaneige", None]}
 
     await _send(ws, "models", convert_for_json(models))
 
@@ -106,13 +104,14 @@ async def _handle_model_message(
 
     match msg_data["type"]:
         case "pet":
-            if msg_data["val"] in PetModels:
+            if msg_data["val"] in pet.Models:
                 await _send(ws, "model", msg_data)
                 return {**data, "pet_model": msg_data["val"]}
         case "snow":
-            if msg_data["val"] == "":
-                msg_data["val"] = None
-            if msg_data["val"] in SnowModels:
+            if msg_data["val"] == "" or msg_data["val"] is None:
+                await _send(ws, "model", None)
+                return {**data, "snow_model": None}
+            if msg_data["val"] in snow.Models:
                 await _send(ws, "model", msg_data)
                 return {**data, "snow_model": msg_data["val"]}
         case _:
