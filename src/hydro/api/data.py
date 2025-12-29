@@ -169,7 +169,7 @@ async def _handle_datasets_message(
     hydro_data = await hydro.read_data(
         id, refresh=msg_data.get("refresh", False)
     )
-    hydro_metadata = hydro.read_metadata(id)
+    hydro_metadata = await hydro.read_metadata(id)
     weather_data = await weather.read_closest_data(
         hydro_data, refresh=msg_data.get("refresh", False)
     )

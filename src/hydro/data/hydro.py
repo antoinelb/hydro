@@ -1,12 +1,20 @@
 import asyncio
 import json
 import re
+import zipfile
+from pathlib import Path
 from typing import Literal, assert_never
 
+import geopandas as gpd
 import httpx
+import numpy as np
 import polars as pl
+import rasterio
+import rasterio.mask
 
 from hydro.utils import paths
+
+# from .watershed import get_watershed_data
 
 ##########
 # public #
@@ -63,7 +71,7 @@ async def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
         return data
 
 
-def read_metadata(id: str) -> dict[str, str | float]:
+async def read_metadata(id: str) -> dict[str, str | float]:
     path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.json"
     if path.exists():
         with open(path, "r") as f:
@@ -73,12 +81,14 @@ def read_metadata(id: str) -> dict[str, str | float]:
         stations = stations.filter(pl.col("id") == id)
         if stations.shape[0] == 0:
             raise ValueError(f"Station with id {id} doesn't exist.")
+        watershed_data = await _get_watershed_data(id)
         metadata = {
             "id": id,
             "name": stations[0, "name"],
             "station": stations[0, "station"],
             "lat": stations[0, "lat"],
             "lon": stations[0, "lon"],
+            **watershed_data,
         }
         with open(path, "w") as f:
             json.dump(metadata, f)
@@ -171,3 +181,118 @@ def _convert_lat_lon_to_decimal(
     hours: float, minutes: float, seconds: float
 ) -> float:
     return hours + minutes / 60 + seconds / 3600
+
+
+async def _get_watershed_data(id: str) -> dict[str, float | list[float]]:
+    watersheds = await _get_watersheds()
+    watershed = watersheds[watersheds["Station"] == id]
+    if watershed.shape[0] == 0:
+        raise ValueError(f"Watershed for station with id {id} doesn't exist.")
+
+    dem_path = await _get_dem(id, watershed)
+
+    return _get_watershed_elevation_bands(watershed, dem_path)
+
+
+async def _get_watersheds() -> gpd.GeoDataFrame:
+    url = "https://www.donneesquebec.ca/recherche/dataset/c31e2bee-a899-46ca-ad84-5798f0f49676/resource/924cce0a-5fcc-47fa-a725-5ec84522090f/download/bassins_versants_stations_ouvertes.zip"
+
+    path = paths.data_dir / "raw" / "hydro" / "watersheds" / "watersheds.shp"
+    if path.exists():
+        return gpd.read_file(path)
+    else:
+        path.parent.mkdir(exist_ok=True, parents=True)
+        zip_path = path.parent / "watersheds.zip"
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            zip_path.write_bytes(resp.content)
+        with zipfile.ZipFile(zip_path, "r") as f:
+            f.extractall(path.parent)
+        zip_path.unlink()
+        for _path in path.parent.glob("*"):
+            _path.rename(_path.parent / f"watersheds{_path.suffix}")
+        watersheds = gpd.read_file(path.parent / "watersheds.shp")
+        return watersheds
+
+
+async def _get_dem(
+    id: str, watershed: gpd.GeoDataFrame, resolution: float = 25
+) -> Path:
+    path = paths.data_dir / "raw" / "hydro" / "dem" / f"{id}.tiff"
+
+    if path.exists():
+        return path
+    else:
+        path.parent.mkdir(exist_ok=True, parents=True)
+        watershed = watershed.to_crs("EPSG:4326")
+        min_lon, min_lat, max_lon, max_lat = watershed.total_bounds
+        res_deg = resolution / 111000  # approximate degrees per meter
+        url = (
+            "https://datacube.services.geo.ca/wrapper/ogc/elevation-hrdem-mosaic"
+            "?SERVICE=WCS"
+            "&VERSION=1.1.1"
+            "&REQUEST=GetCoverage"
+            "&IDENTIFIER=dtm"
+            "&FORMAT=image/geotiff"
+            f"&BOUNDINGBOX={min_lat},{min_lon},{max_lat},{max_lon},urn:ogc:def:crs:EPSG::4326"
+            f"&GRIDBASECRS=urn:ogc:def:crs:EPSG::4326"
+            f"&GRIDOFFSETS={-res_deg},{res_deg}"
+        )
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.get(url)
+            try:
+                resp.raise_for_status()
+            except Exception:
+                print(resp.text)
+                raise
+            path.write_bytes(resp.content)
+        return path
+
+
+def _get_watershed_elevation_bands(
+    watershed: gpd.GeoDataFrame, dem_path: Path, *, n_bands: int = 5
+) -> dict[str, float | list[float]]:
+    with rasterio.open(dem_path) as src:
+        watershed = watershed.to_crs(src.crs)
+
+        out_image, out_transform = rasterio.mask.mask(
+            src, watershed.geometry, crop=True
+        )
+        elevations = out_image[0]
+
+        # Get valid (non-nodata) values
+        nodata = src.nodata if src.nodata else -9999
+        valid_mask = (elevations != nodata) & np.isfinite(elevations)
+        elevations = elevations[valid_mask]
+        if len(elevations) == 0:
+            raise ValueError("No valid elevation data within watershed.")
+
+        edges = np.linspace(
+            np.min(elevations), np.max(elevations), n_bands + 1
+        )
+
+        bands = []
+        for i in range(n_bands):
+            band_min = edges[i]
+            band_max = edges[i + 1]
+
+            # Count pixels in this band
+            if i == n_bands - 1:
+                in_band = (elevations >= band_min) & (elevations <= band_max)
+            else:
+                in_band = (elevations >= band_min) & (elevations < band_max)
+
+            band_elevs = elevations[in_band]
+            median_elev = (
+                float(np.median(band_elevs))
+                if len(band_elevs) > 0
+                else (band_min + band_max) / 2
+            )
+
+            bands.append(median_elev)
+
+    return {
+        "elevation_bands": bands,
+        "median_elevation": float(np.median(np.array(bands))),
+    }

@@ -5,11 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "geopandas>=1.1.2",
     "httpx>=0.28.1",
     "hydro-rs",
     "numpy>=2.4.0",
     "polars>=1.36.1",
     "pyproj>=3.7.2",
+    "rasterio>=1.4.4",
     "starlette>=0.50.0",
     "uvicorn>=0.40.0",
     "websockets>=15.0.1",

@@ -9,7 +9,7 @@ import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
 export function initModel() {
   return {
     loading: false,
-    open: true,
+    open: false,
     ws: null,
     station: null,
     petModels: null,
