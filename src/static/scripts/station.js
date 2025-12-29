@@ -13,7 +13,7 @@ import { connect } from "./utils/ws.js";
 export function initModel() {
   return {
     loading: false,
-    open: false,
+    open: true,
     ws: null,
     map: null,
     stations: null,
@@ -56,6 +56,7 @@ export async function update(model, msg, dispatch, createNotification) {
       if (model.stations === null) {
         dispatch({ type: "GetStations" });
       }
+      dispatch({ type: "CreateMap" });
       return { ...model, loading: false, ws: msg.data };
     case "Disconnected":
       setTimeout(() => dispatch({ type: "Connect" }), 3000);

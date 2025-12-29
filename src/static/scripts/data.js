@@ -9,7 +9,7 @@ import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
 export function initModel() {
   return {
     loading: false,
-    open: true,
+    open: false,
     ws: null,
     station: null,
     petModels: null,
@@ -50,6 +50,8 @@ export async function update(model, msg, dispatch, createNotification) {
         dispatch({ type: "CreateMap" });
       }
       return { ...model, open: open };
+    case "UpdateStation":
+      return { ...model, station: msg.data };
     case "Connect":
       connect("data/", handleMessage, dispatch, createNotification);
       return { ...model, loading: true };
@@ -63,31 +65,10 @@ export async function update(model, msg, dispatch, createNotification) {
           data: { station: model.station, type: "hydro" },
         });
       }
-      if (model.petModel != null) {
-        dispatch({
-          type: "UpdateModel",
-          data: { type: "pet", val: model.petModel },
-        });
-      }
-      if (model.snowModel != null) {
-        dispatch({
-          type: "UpdateModel",
-          data: { type: "snow", val: model.snowModel },
-        });
-      }
-      if (model.nValYears != null) {
-        dispatch({
-          type: "UpdateValidationYears",
-          data: model.nValYears,
-        });
-      }
       return { ...model, loading: false, ws: msg.data };
     case "Disconnected":
       setTimeout(() => dispatch({ type: "Connect" }), 3000);
       return { ...model, ws: null };
-    case "UpdateStation":
-      dispatch({ type: "GetData", data: { station: msg.data, type: "hydro" } });
-      return { ...model, station: msg.data };
     case "GetModels":
       if (model.ws?.readyState === WebSocket.OPEN) {
         model.ws.send(JSON.stringify({ type: "models" }));
@@ -114,27 +95,14 @@ export async function update(model, msg, dispatch, createNotification) {
       switch (msg.data.type) {
         case "pet":
           window.localStorage.setItem("pet_model", msg.data.val);
-          if (
-            model.hydroData !== null &&
-            model.weatherData !== null &&
-            model.precipitationData !== null &&
-            model.nValYears !== null
-          ) {
-            dispatch({ type: "GetDatasets" });
-          }
-          return { ...model, petModel: msg.data.val };
+          model = { ...model, petModel: msg.data.val };
+          getDatasets(model, dispatch);
+          return model;
         case "snow":
           window.localStorage.setItem("snow_model", msg.data.val);
-          if (
-            model.hydroData !== null &&
-            model.weatherData !== null &&
-            model.precipitationData !== null &&
-            model.petModel !== null &&
-            model.nValYears !== null
-          ) {
-            dispatch({ type: "GetDatasets" });
-          }
-          return { ...model, snowModel: msg.data.val };
+          model = { ...model, snowModel: msg.data.val };
+          getDatasets(model, dispatch);
+          return model;
         default:
           return model;
       }
@@ -150,15 +118,9 @@ export async function update(model, msg, dispatch, createNotification) {
       return model;
     case "UpdatedValidationYears":
       window.localStorage.setItem("n_val_years", msg.data.toString());
-      if (
-        model.hydroData !== null &&
-        model.weatherData !== null &&
-        model.precipitationData !== null &&
-        model.petModel !== null
-      ) {
-        dispatch({ type: "GetDatasets" });
-      }
-      return { ...model, nValYears: msg.data };
+      model = { ...model, nValYears: msg.data };
+      getDatasets(model, dispatch);
+      return model;
     case "GetData":
       if (model.ws?.readyState === WebSocket.OPEN) {
         model.ws.send(
@@ -174,26 +136,30 @@ export async function update(model, msg, dispatch, createNotification) {
         type: "GetData",
         data: { station: model.station, type: "weather" },
       });
+      return { ...model, loading: false, hydroData: msg.data };
+    case "GotWeatherData":
       dispatch({
         type: "GetData",
         data: { station: model.station, type: "precipitation" },
       });
-      return { ...model, loading: false, hydroData: msg.data };
-    case "GotWeatherData":
       return { ...model, loading: false, weatherData: msg.data };
     case "GotPrecipitationData":
-      if (
-        model.hydroData !== null &&
-        model.weatherData !== null &&
-        model.petModel !== null &&
-        model.nValYears !== null
-      ) {
-        dispatch({ type: "GetDatasets" });
-      }
-      return { ...model, loading: false, precipitationData: msg.data };
+      model = { ...model, loading: false, precipitationData: msg.data };
+      getDatasets(model, dispatch);
+      return model;
     case "GetDatasets":
       if (model.ws?.readyState === WebSocket.OPEN) {
-        model.ws.send(JSON.stringify({ type: "datasets" }));
+        model.ws.send(
+          JSON.stringify({
+            type: "datasets",
+            data: {
+              station: model.station,
+              pet_model: model.petModel,
+              snow_model: model.snowModel,
+              n_valid_years: model.nValYears,
+            },
+          }),
+        );
       }
       return { ...model, loading: true };
     case "GotDatasets":
@@ -225,7 +191,6 @@ function handleMessage(event, dispatch, createNotification) {
       dispatch({ type: "UpdatedModel", data: msg.data });
       break;
     case "validation_years":
-      console.log("TEST");
       dispatch({ type: "UpdatedValidationYears", data: msg.data });
       break;
     case "hydro_data":
@@ -243,6 +208,18 @@ function handleMessage(event, dispatch, createNotification) {
     default:
       createNotification("Unknown websocket message", true);
       break;
+  }
+}
+
+function getDatasets(model, dispatch) {
+  if (
+    model.hydroData !== null &&
+    model.weatherData !== null &&
+    model.precipitationData !== null &&
+    model.petModel !== null &&
+    model.nValYears !== null
+  ) {
+    dispatch({ type: "GetDatasets" });
   }
 }
 
@@ -280,15 +257,7 @@ function openView(model) {
   }
 }
 
-function loadingView(model) {
-  if (model.loading) {
-    document.querySelector("#data-main > .loading").removeAttribute("hidden");
-  } else {
-    document
-      .querySelector("#data-main > .loading")
-      .setAttribute("hidden", true);
-  }
-}
+function loadingView(model) {}
 
 function initMetaView(model, globalDispatch) {
   document.getElementById("meta").appendChild(
@@ -338,7 +307,6 @@ function initMainView(model, dispatch) {
           },
         ],
       ),
-      createLoading(),
       create(
         "form",
         {},

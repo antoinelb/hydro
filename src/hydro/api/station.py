@@ -10,16 +10,6 @@ from hydro.logging import logger
 
 from .utils import convert_for_json
 
-#########
-# types #
-#########
-
-
-class Data(TypedDict):
-    stations: pl.DataFrame | None
-    current_station: str | None
-
-
 ##########
 # public #
 ##########
@@ -38,35 +28,27 @@ def get_routes() -> list[BaseRoute]:
 
 async def _websocket_handler(ws: WebSocket) -> None:
     await ws.accept()
-    data = {}
     try:
         while True:
             msg = await ws.receive_json()
-            data = await _handle_message(ws, msg, data)
+            await _handle_message(ws, msg)
     except WebSocketDisconnect:
         pass
 
 
-async def _handle_message(
-    ws: WebSocket, msg: dict[str, Any], data: Data
-) -> Data:
+async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
     logger.info(f"Websocket {msg.get('type')} message")
     match msg.get("type"):
         case "stations":
-            return await _handle_stations_message(
-                ws, msg.get("data", {}), data
-            )
+            await _handle_stations_message(ws, msg.get("data", {}))
         case "station":
-            return await _handle_station_message(
-                ws, msg.get("data", None), data
-            )
+            await _handle_station_message(ws, msg.get("data", None))
 
 
 async def _handle_stations_message(
-    ws: WebSocket, msg_data: dict[str, Any], data: Data
-) -> Data:
+    ws: WebSocket, msg_data: dict[str, Any]
+) -> None:
     stations = hydro.read_stations()
-    data = {**data, "stations": stations}
 
     station = msg_data.get("station", "").lower()
     if station != "":
@@ -81,28 +63,20 @@ async def _handle_stations_message(
 
     await _send(ws, "stations", convert_for_json(stations))
 
-    return data
 
-
-async def _handle_station_message(
-    ws: WebSocket, msg_data: str | None, data: Data
-) -> Data:
+async def _handle_station_message(ws: WebSocket, msg_data: str | None) -> None:
     if msg_data is None:
         await _send(ws, "error", "No station was provided.")
-        return data
+        return
 
     station = msg_data
 
-    stations = data.get("stations")
-    if stations is None:
-        stations = hydro.read_stations()
-        data = {**data, "stations": stations}
+    stations = hydro.read_stations()
 
     stations = stations.filter(pl.col("station") == station)
 
     if stations.shape[0] == 0:
         await _send(ws, "error", f"The station {station} doesn't exist.")
-        return data
     else:
         station = stations[0, "station"]
         await _send(
@@ -114,10 +88,6 @@ async def _handle_station_message(
                 "lon": stations[0, "lon"],
             },
         )
-        return {
-            **data,
-            "current_station": station,
-        }
 
 
 ###########
