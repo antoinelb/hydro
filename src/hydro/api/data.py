@@ -5,7 +5,7 @@ from hydro_rs import pet, snow
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from hydro.data import hydro, precipitation, weather
+from hydro.data import create_datasets, hydro, precipitation, weather
 from hydro.logging import logger
 
 from .utils import convert_for_json
@@ -85,6 +85,8 @@ async def _handle_message(
             return await _handle_precipitation_data_message(
                 ws, msg.get("data", {}), data
             )
+        case "datasets":
+            return await _handle_datasets_message(ws, data)
 
 
 async def _handle_models_message(ws: WebSocket, data: Data) -> Data:
@@ -104,16 +106,23 @@ async def _handle_model_message(
 
     match msg_data["type"]:
         case "pet":
+            print(msg_data)
+            print(pet.Models)
+            print(msg_data["val"] in pet.Models)
             if msg_data["val"] in pet.Models:
                 await _send(ws, "model", msg_data)
                 return {**data, "pet_model": msg_data["val"]}
+            else:
+                return data
         case "snow":
             if msg_data["val"] == "" or msg_data["val"] is None:
                 await _send(ws, "model", None)
                 return {**data, "snow_model": None}
-            if msg_data["val"] in snow.Models:
+            elif msg_data["val"] in snow.Models:
                 await _send(ws, "model", msg_data)
                 return {**data, "snow_model": msg_data["val"]}
+            else:
+                return data
         case _:
             await _send(ws, "error", "The only valid types are pet and snow.")
             return data
@@ -183,6 +192,41 @@ async def _handle_precipitation_data_message(
     precipitation_data = _prepare_data_to_show(precipitation_data)
 
     await _send(ws, "precipitation_data", convert_for_json(precipitation_data))
+
+    return data
+
+
+async def _handle_datasets_message(ws: WebSocket, data: Data) -> Data:
+    if (
+        data["hydro_data"] is None
+        or data["weather_data"] is None
+        or data["precipitation_data"] is None
+        or data["pet_model"] is None
+        or data["validation_years"] is None
+    ):
+        await _send(
+            ws,
+            "error",
+            "The hydro, weather and precipitation data must have been read and the pet model set.",
+        )
+        return data
+
+    calib_data, valid_data = create_datasets(
+        data["hydro_data"],
+        data["weather_data"],
+        data["precipitation_data"],
+        data["pet_model"],
+        data["snow_model"],
+        data["validation_years"],
+    )
+
+    await _send(
+        ws,
+        "datasets",
+        convert_for_json(
+            {"calibration": calib_data, "validation": valid_data}
+        ),
+    )
 
     return data
 

@@ -14,7 +14,7 @@ export function initModel() {
     station: null,
     petModels: null,
     snowModels: null,
-    petModel: window.localStorage.getItem("pet_model") || "odin",
+    petModel: window.localStorage.getItem("pet_model") || "oudin",
     snowModel:
       window.localStorage.getItem("snow_model") === "null"
         ? null
@@ -23,6 +23,8 @@ export function initModel() {
     hydroData: null,
     weatherData: null,
     precipitationData: null,
+    calibData: null,
+    validData: null,
   };
 }
 
@@ -61,6 +63,24 @@ export async function update(model, msg, dispatch, createNotification) {
           data: { station: model.station, type: "hydro" },
         });
       }
+      if (model.petModel != null) {
+        dispatch({
+          type: "UpdateModel",
+          data: { type: "pet", val: model.petModel },
+        });
+      }
+      if (model.snowModel != null) {
+        dispatch({
+          type: "UpdateModel",
+          data: { type: "snow", val: model.snowModel },
+        });
+      }
+      if (model.nValYears != null) {
+        dispatch({
+          type: "UpdateValidationYears",
+          data: model.nValYears,
+        });
+      }
       return { ...model, loading: false, ws: msg.data };
     case "Disconnected":
       setTimeout(() => dispatch({ type: "Connect" }), 3000);
@@ -69,7 +89,9 @@ export async function update(model, msg, dispatch, createNotification) {
       dispatch({ type: "GetData", data: { station: msg.data, type: "hydro" } });
       return { ...model, station: msg.data };
     case "GetModels":
-      getModels(model.ws);
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(JSON.stringify({ type: "models" }));
+      }
       return { ...model, loading: true };
     case "GotModels":
       return {
@@ -79,27 +101,73 @@ export async function update(model, msg, dispatch, createNotification) {
         snowModels: msg.data.snow,
       };
     case "UpdateModel":
-      updateModel(model.ws, msg.data.type, msg.data.val);
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(
+          JSON.stringify({
+            type: "model",
+            data: { type: msg.data.type, val: msg.data.val },
+          }),
+        );
+      }
       return model;
     case "UpdatedModel":
       switch (msg.data.type) {
         case "pet":
           window.localStorage.setItem("pet_model", msg.data.val);
+          if (
+            model.hydroData !== null &&
+            model.weatherData !== null &&
+            model.precipitationData !== null &&
+            model.nValYears !== null
+          ) {
+            dispatch({ type: "GetDatasets" });
+          }
           return { ...model, petModel: msg.data.val };
         case "snow":
           window.localStorage.setItem("snow_model", msg.data.val);
+          if (
+            model.hydroData !== null &&
+            model.weatherData !== null &&
+            model.precipitationData !== null &&
+            model.petModel !== null &&
+            model.nValYears !== null
+          ) {
+            dispatch({ type: "GetDatasets" });
+          }
           return { ...model, snowModel: msg.data.val };
         default:
           return model;
       }
     case "UpdateValidationYears":
-      updateValidationYears(model.ws, msg.data);
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(
+          JSON.stringify({
+            type: "validation_years",
+            data: parseInt(msg.data),
+          }),
+        );
+      }
       return model;
     case "UpdatedValidationYears":
       window.localStorage.setItem("n_val_years", msg.data.toString());
+      if (
+        model.hydroData !== null &&
+        model.weatherData !== null &&
+        model.precipitationData !== null &&
+        model.petModel !== null
+      ) {
+        dispatch({ type: "GetDatasets" });
+      }
       return { ...model, nValYears: msg.data };
     case "GetData":
-      getData(model.ws, msg.data.station, msg.data.type);
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(
+          JSON.stringify({
+            type: `${msg.data.type}_data`,
+            data: { station: msg.data.station },
+          }),
+        );
+      }
       return { ...model, loading: true };
     case "GotHydroData":
       dispatch({
@@ -114,8 +182,27 @@ export async function update(model, msg, dispatch, createNotification) {
     case "GotWeatherData":
       return { ...model, loading: false, weatherData: msg.data };
     case "GotPrecipitationData":
-      console.log("TEST");
+      if (
+        model.hydroData !== null &&
+        model.weatherData !== null &&
+        model.petModel !== null &&
+        model.nValYears !== null
+      ) {
+        dispatch({ type: "GetDatasets" });
+      }
       return { ...model, loading: false, precipitationData: msg.data };
+    case "GetDatasets":
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(JSON.stringify({ type: "datasets" }));
+      }
+      return { ...model, loading: true };
+    case "GotDatasets":
+      return {
+        ...model,
+        loading: false,
+        calibData: msg.data.calibration,
+        validData: msg.data.validation,
+      };
     default:
       return model;
   }
@@ -150,35 +237,12 @@ function handleMessage(event, dispatch, createNotification) {
     case "precipitation_data":
       dispatch({ type: "GotPrecipitationData", data: msg.data });
       break;
+    case "datasets":
+      dispatch({ type: "GotDatasets", data: msg.data });
+      break;
     default:
       createNotification("Unknown websocket message", true);
       break;
-  }
-}
-
-function getModels(ws) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "models" }));
-  }
-}
-
-function updateModel(ws, type, val) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "model", data: { type: type, val: val } }));
-  }
-}
-
-function updateValidationYears(ws, val) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "validation_years", data: parseInt(val) }));
-  }
-}
-
-function getData(ws, station, type) {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(
-      JSON.stringify({ type: `${type}_data`, data: { station: station } }),
-    );
   }
 }
 
@@ -200,6 +264,7 @@ export function view(model, dispatch) {
   metaView(model);
   loadingView(model);
   formView(model);
+  statsView(model);
   dataView(model.hydroData, "discharge", false, true);
   dataView(model.weatherData, "temperature", false, false);
   dataView(model.precipitationData, "precipitation", true, false);
@@ -343,6 +408,18 @@ function initMainView(model, dispatch) {
         ],
         [{ event: "submit", fct: (event) => event.preventDefault() }],
       ),
+      create("div", { id: "data-main__stats" }, [
+        create("span", { class: "label" }, ["# données hydrologiques"]),
+        create("span", { class: "label" }, ["# données météo"]),
+        create("span", { class: "label" }, ["# données précipitation"]),
+        create("span", { id: "data-main__stats__hydro" }, []),
+        create("span", { id: "data-main__stats__weather" }, []),
+        create("span", { id: "data-main__stats__precip" }, []),
+        create("span", { class: "label" }, ["# données calibration"]),
+        create("span", { class: "label" }, ["# données validation"]),
+        create("span", { id: "data-main__stats__calib" }, []),
+        create("span", { id: "data-main__stats__valid" }, []),
+      ]),
       create("div", { id: "data-main__plots" }, [
         create("svg", { id: "data-main__discharge", class: "plot" }),
         create("svg", { id: "data-main__temperature", class: "plot" }),
@@ -561,5 +638,28 @@ function dataView(data, feature, showXLabels = false, showLegend = false) {
         .attr("y", 12)
         .text((d) => d.label);
     }
+  }
+}
+
+function statsView(model) {
+  if (model.hydroData !== null) {
+    document.getElementById("data-main__stats__hydro").textContent =
+      formatNumber(model.hydroData.length);
+  }
+  if (model.weatherData !== null) {
+    document.getElementById("data-main__stats__weather").textContent =
+      formatNumber(model.weatherData.length);
+  }
+  if (model.precipitationData !== null) {
+    document.getElementById("data-main__stats__precip").textContent =
+      formatNumber(model.precipitationData.length);
+  }
+  if (model.calibData !== null) {
+    document.getElementById("data-main__stats__calib").textContent =
+      formatNumber(model.calibData.length);
+  }
+  if (model.validData !== null) {
+    document.getElementById("data-main__stats__valid").textContent =
+      formatNumber(model.validData.length);
   }
 }

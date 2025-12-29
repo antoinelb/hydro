@@ -1,8 +1,8 @@
 #data-meta {
+  column-gap: 0.5em;
   display: grid;
-  grid-column-gap: 0.5em;
-  grid-row-gap: 0.25em;
   grid-template-columns: max-content 1fr;
+  row-gap: 0.25em;
 
   & h2 {
     grid-column: 1 / -1;
@@ -25,7 +25,7 @@
 #data-main {
   display: grid;
   gap: 1em;
-  grid-template-rows: max-content 1fr;
+  grid-template-rows: max-content max-content 1fr;
   height: 100%;
   width: 100%;
 
@@ -71,6 +71,30 @@
         padding: 0 0.25em;
         width: 2em;
       }
+    }
+  }
+
+  & #data-main__stats {
+    column-gap: 1em;
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-columns: 3fr 1fr 3fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    left: calc(50% - 20em);
+    position: relative;
+    width: 40em;
+
+    & span {
+      text-align: end;
+
+      &.label {
+        text-align: start;
+      }
+    }
+
+    & #data-main__stats__calib,
+    & #data-main__stats__valid {
+      grid-column: 4;
     }
   }
 
