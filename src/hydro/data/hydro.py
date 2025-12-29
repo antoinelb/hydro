@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 from typing import Literal, assert_never
 
@@ -60,6 +61,28 @@ async def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
         data = await _fetch_data(id)
         data.write_ipc(path)
         return data
+
+
+def read_metadata(id: str) -> dict[str, str | float]:
+    path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.json"
+    if path.exists():
+        with open(path, "r") as f:
+            return json.load(f)
+    else:
+        stations = read_stations()
+        stations = stations.filter(pl.col("id") == id)
+        if stations.shape[0] == 0:
+            raise ValueError(f"Station with id {id} doesn't exist.")
+        metadata = {
+            "id": id,
+            "name": stations[0, "name"],
+            "station": stations[0, "station"],
+            "lat": stations[0, "lat"],
+            "lon": stations[0, "lon"],
+        }
+        with open(path, "w") as f:
+            json.dump(metadata, f)
+        return metadata
 
 
 ###########

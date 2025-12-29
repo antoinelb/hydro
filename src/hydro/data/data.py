@@ -1,7 +1,7 @@
 from typing import Literal
 
 import polars as pl
-from hydro_rs import pet, snow
+from hydro_rs import pet
 
 from hydro.utils import paths
 
@@ -15,13 +15,14 @@ def create_datasets(
     hydro_data: pl.DataFrame,
     weather_data: pl.DataFrame,
     precipitation_data: pl.DataFrame,
+    hydro_metadata: dict[str, str | float],
     pet_model: Literal[tuple(pet.Models)],  # type: ignore
-    snow_model: Literal[tuple(snow.Models)] | None,  # type: ignore
     n_valid_years: int,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     data = _read_joined_data(
         station, hydro_data, weather_data, precipitation_data
     )
+    data = _add_pet_data(station, data, hydro_metadata, pet_model)
     year_threshold = data["date"].dt.year().unique().sort()[-n_valid_years - 1]
     calib_data = data.filter(pl.col("date").dt.year() < year_threshold)
     valid_data = data.filter(pl.col("date").dt.year() >= year_threshold)
@@ -63,9 +64,10 @@ def _read_joined_data(
         return data
 
 
-def _add_pet(
+def _add_pet_data(
     station: str,
     data: pl.DataFrame,
+    hydro_metadata: dict[str, str | float],
     pet_model: Literal[tuple(pet.Models)],  # type: ignore
 ) -> pl.DataFrame:
     last_date = data[-1, "date"]
@@ -76,14 +78,24 @@ def _add_pet(
         / f"{station}_{last_date}_{pet_model}.ipc"
     )
     if path.exists():
-        pet = pl.read_ipc(path)
-        return data.join(pet, on="date").sort("date")
+        pet_data = pl.read_ipc(path)
     else:
         path.parent.mkdir(exist_ok=True, parents=True)
         match (pet_model):
             case "oudin":
-                pass
+                temperature = data["temperature"].to_numpy()
+                day_of_year = (
+                    data["date"].dt.ordinal_day().cast(pl.Float64).to_numpy()
+                )
+                pet_data_ = pet.oudin.simulate(
+                    temperature, day_of_year, float(hydro_metadata["lat"])
+                )
+                pet_data = pl.DataFrame(
+                    {"date": data["date"], "pet": pet_data_}
+                )
+                pet_data.write_ipc(path)
             case _:
                 raise NotImplementedError(
                     f"The pet model {pet_model} isn't implemented."
                 )
+    return data.join(pet_data, on="date").sort("date")

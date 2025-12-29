@@ -1,4 +1,4 @@
-import { create, createLoading, clear } from "./utils/elements.js";
+import { create, clear } from "./utils/elements.js";
 import { connect } from "./utils/ws.js";
 import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
 
@@ -9,16 +9,11 @@ import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
 export function initModel() {
   return {
     loading: false,
-    open: false,
+    open: true,
     ws: null,
     station: null,
     petModels: null,
-    snowModels: null,
     petModel: window.localStorage.getItem("pet_model") || "oudin",
-    snowModel:
-      window.localStorage.getItem("snow_model") === "null"
-        ? null
-        : window.localStorage.getItem("snow_model"),
     nValYears: parseInt(window.localStorage.getItem("n_val_years") || "5"),
     hydroData: null,
     weatherData: null,
@@ -56,7 +51,7 @@ export async function update(model, msg, dispatch, createNotification) {
       connect("data/", handleMessage, dispatch, createNotification);
       return { ...model, loading: true };
     case "Connected":
-      if (model.petModels === null || model.snowModels === null) {
+      if (model.petModels === null) {
         dispatch({ type: "GetModels" });
       }
       if (model.station !== null && model.hydroData === null) {
@@ -79,7 +74,6 @@ export async function update(model, msg, dispatch, createNotification) {
         ...model,
         loading: false,
         petModels: msg.data.pet,
-        snowModels: msg.data.snow,
       };
     case "UpdateModel":
       if (model.ws?.readyState === WebSocket.OPEN) {
@@ -96,11 +90,6 @@ export async function update(model, msg, dispatch, createNotification) {
         case "pet":
           window.localStorage.setItem("pet_model", msg.data.val);
           model = { ...model, petModel: msg.data.val };
-          getDatasets(model, dispatch);
-          return model;
-        case "snow":
-          window.localStorage.setItem("snow_model", msg.data.val);
-          model = { ...model, snowModel: msg.data.val };
           getDatasets(model, dispatch);
           return model;
         default:
@@ -155,7 +144,6 @@ export async function update(model, msg, dispatch, createNotification) {
             data: {
               station: model.station,
               pet_model: model.petModel,
-              snow_model: model.snowModel,
               n_valid_years: model.nValYears,
             },
           }),
@@ -272,8 +260,6 @@ function initMetaView(model, globalDispatch) {
           "Modèle d'évapotranspiration potentielle:",
         ),
         create("span", { id: "data__pet", class: "data__pet" }, []),
-        create("span", { class: "data__snow" }, "Modèle de neige:"),
-        create("span", { id: "data__snow", class: "data__snow" }, []),
         create("span", {}, "Nombre d'années de validation:"),
         create("span", { id: "data__val-years" }, []),
       ],
@@ -324,25 +310,6 @@ function initMainView(model, dispatch) {
                     dispatch({
                       type: "UpdateModel",
                       data: { type: "pet", val: event.target.value },
-                    });
-                  },
-                },
-              ],
-            ),
-          ]),
-          create("label", { for: "data-selection__snow" }, [
-            "Neige",
-            create(
-              "select",
-              { id: "data-selection__snow", hidden: true },
-              [],
-              [
-                {
-                  event: "input",
-                  fct: (event) => {
-                    dispatch({
-                      type: "UpdateModel",
-                      data: { type: "snow", val: event.target.value },
                     });
                   },
                 },
@@ -410,26 +377,11 @@ function metaView(model) {
     );
   }
 
-  if (model.snowModel === null || model.snowModel === "") {
-    document.getElementById("data__snow").textContent = "Aucun";
-    [...document.querySelectorAll(".data__snow")].forEach((span) =>
-      span.classList.add("disabled"),
-    );
-  } else {
-    document.getElementById("data__snow").textContent = toTitle(
-      model.snowModel,
-    );
-    [...document.querySelectorAll(".data__snow")].forEach((span) =>
-      span.classList.remove("disabled"),
-    );
-  }
-
   document.getElementById("data__val-years").textContent = model.nValYears;
 }
 
 function formView(model) {
   const petSelect = document.getElementById("data-selection__pet");
-  const snowSelect = document.getElementById("data-selection__snow");
 
   if (petSelect.children.length === 0 && model.petModels !== null) {
     petSelect.removeAttribute("hidden");
@@ -437,19 +389,6 @@ function formView(model) {
       const option = create("option", { value: _model }, [toTitle(_model)]);
       option.selected = _model === model.petModel;
       petSelect.appendChild(option);
-    });
-  }
-
-  if (snowSelect.children.length === 0 && model.snowModels !== null) {
-    snowSelect.removeAttribute("hidden");
-    model.snowModels.forEach((_model) => {
-      const option = create(
-        "option",
-        { value: _model === null ? "" : _model },
-        [_model === null ? "Aucun" : toTitle(_model)],
-      );
-      option.selected = _model === model.snowModel;
-      snowSelect.appendChild(option);
     });
   }
 }
@@ -585,7 +524,7 @@ function dataView(data, feature, showXLabels = false, showLegend = false) {
         .enter()
         .append("g")
         .attr("class", "legend-item")
-        .attr("transform", (d, i) => `translate(0, ${i * 20})`);
+        .attr("transform", (_, i) => `translate(0, ${i * 20})`);
       legendItems
         .filter((d) => d.type === "line")
         .append("line")

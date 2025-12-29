@@ -1,4 +1,4 @@
-from typing import Any, TypedDict
+from typing import Any
 
 import polars as pl
 from hydro_rs import pet, snow
@@ -155,7 +155,7 @@ async def _handle_datasets_message(
 ) -> None:
     if any(
         key not in msg_data
-        for key in ("station", "pet_model", "snow_model", "n_valid_years")
+        for key in ("station", "pet_model", "n_valid_years")
     ):
         await _send(
             ws,
@@ -169,6 +169,7 @@ async def _handle_datasets_message(
     hydro_data = await hydro.read_data(
         id, refresh=msg_data.get("refresh", False)
     )
+    hydro_metadata = hydro.read_metadata(id)
     weather_data = await weather.read_closest_data(
         hydro_data, refresh=msg_data.get("refresh", False)
     )
@@ -181,8 +182,8 @@ async def _handle_datasets_message(
         hydro_data,
         weather_data,
         precipitation_data,
+        hydro_metadata,
         msg_data["pet_model"],
-        msg_data["snow_model"],
         msg_data["n_valid_years"],
     )
 

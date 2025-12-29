@@ -35,18 +35,18 @@
     display: flex;
     gap: 3em;
     justify-content: space-between;
-    left: calc(50% - 20em);
+    left: calc(50% - 15em);
     padding: 0.5em 1em;
     position: relative;
     top: 0.5em;
-    width: 40em;
+    width: 30em;
 
     & label {
       align-items: center;
       display: flex;
       gap: 0.5em;
       justify-content: space-around;
-      width: min-content;
+      width: max-content;
 
       & select {
         background: none;
@@ -78,11 +78,11 @@
     column-gap: 1em;
     display: grid;
     grid-auto-flow: column;
-    grid-template-columns: 3fr 1fr 3fr 1fr;
+    grid-template-columns: max-content 1fr max-content 1fr;
     grid-template-rows: 1fr 1fr 1fr;
-    left: calc(50% - 20em);
+    left: calc(50% - 15em);
     position: relative;
-    width: 40em;
+    width: 30em;
 
     & span {
       text-align: end;

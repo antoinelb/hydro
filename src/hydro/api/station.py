@@ -1,5 +1,5 @@
 from datetime import date
-from typing import Any, TypedDict
+from typing import Any
 
 import polars as pl
 from starlette.routing import BaseRoute, WebSocketRoute
@@ -69,25 +69,14 @@ async def _handle_station_message(ws: WebSocket, msg_data: str | None) -> None:
         await _send(ws, "error", "No station was provided.")
         return
 
-    station = msg_data
+    # station is in the format `<name> (<id>)`
+    id = msg_data.split()[-1][1:-1]
 
-    stations = hydro.read_stations()
-
-    stations = stations.filter(pl.col("station") == station)
-
-    if stations.shape[0] == 0:
-        await _send(ws, "error", f"The station {station} doesn't exist.")
-    else:
-        station = stations[0, "station"]
-        await _send(
-            ws,
-            "station",
-            {
-                "station": stations[0, "station"],
-                "lat": stations[0, "lat"],
-                "lon": stations[0, "lon"],
-            },
-        )
+    try:
+        metadata = hydro.read_metadata(id)
+        await _send(ws, "station", metadata)
+    except ValueError as exc:
+        await _send(ws, "error", str(exc))
 
 
 ###########

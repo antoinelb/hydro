@@ -1,9 +1,4 @@
-import {
-  create,
-  createSlider,
-  createLoading,
-  clear,
-} from "./utils/elements.js";
+import { create, createSlider, clear } from "./utils/elements.js";
 import { connect } from "./utils/ws.js";
 
 /*********/
@@ -13,7 +8,7 @@ import { connect } from "./utils/ws.js";
 export function initModel() {
   return {
     loading: false,
-    open: true,
+    open: false,
     ws: null,
     map: null,
     stations: null,
@@ -62,7 +57,9 @@ export async function update(model, msg, dispatch, createNotification) {
       setTimeout(() => dispatch({ type: "Connect" }), 3000);
       return { ...model, ws: null };
     case "CreateMap":
-      createMap(dispatch);
+      if (model.map === null) {
+        createMap(dispatch);
+      }
       return { ...model, loading: true };
     case "CreatedMap":
       return { ...model, loading: false, map: msg.data };
@@ -185,17 +182,7 @@ function openView(model) {
   }
 }
 
-function loadingView(model) {
-  if (model.loading) {
-    document
-      .querySelector("#station-main > .loading")
-      .removeAttribute("hidden");
-  } else {
-    document
-      .querySelector("#station-main > .loading")
-      .setAttribute("hidden", true);
-  }
-}
+function loadingView(model) {}
 
 function initMetaView(model, globalDispatch) {
   document.getElementById("meta").appendChild(
@@ -262,7 +249,6 @@ function initMainView(model, dispatch) {
         ),
       ]),
       create("div", { id: "station-main__map", hidden: true }),
-      createLoading(),
     ]),
   );
 }
