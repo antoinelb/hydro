@@ -1,9 +1,11 @@
 import { create } from "./utils/elements.js";
+import { checkEscape } from "./utils/listeners.js";
 
 import * as settings from "./settings.js";
 import * as notifications from "./notifications.js";
 import * as station from "./station.js";
 import * as data from "./data.js";
+import * as calibration from "./calibration.js";
 
 /*********/
 /* model */
@@ -17,6 +19,7 @@ function initModel() {
     notifications: notifications.initModel(),
     station: station.initModel(),
     data: data.initModel(),
+    calibration: calibration.initModel(),
   };
 }
 
@@ -37,6 +40,13 @@ async function update(model, msg, dispatch) {
     case "CheckEscape":
       dispathCheckEscape(model, msg.data, dispatch);
       return model;
+    case "SetPreventEscape":
+      setTimeout(() => {
+        dispatch({ type: "UnsetPreventEscape" });
+      });
+      return { ...model, preventEscape: true };
+    case "UnsetPreventEscape":
+      return { ...model, preventEscape: false };
     case "SelectSection":
       dispatchSelectSection(msg.data, dispatch);
       return model;
@@ -65,13 +75,7 @@ async function update(model, msg, dispatch) {
         _station.currentStation !== null &&
         _station.currentStation.station !== model.data.station
       ) {
-        dispatch({
-          type: "DataMsg",
-          data: {
-            type: "UpdateStation",
-            data: _station.currentStation.station,
-          },
-        });
+        dispatchUpdateStation(_station.currentStation.station, dispatch);
       }
       return {
         ...model,
@@ -87,29 +91,55 @@ async function update(model, msg, dispatch) {
           createNotification,
         ),
       };
+    case "CalibrationMsg":
+      return {
+        ...model,
+        calibration: await calibration.update(
+          model.calibration,
+          msg.data,
+          dispatch,
+          createNotification,
+        ),
+      };
     default:
       return model;
   }
 }
 
 function dispathCheckEscape(model, event, dispatch) {
-  if (!model.preventEscape) {
-    if (
-      event.type === "click" ||
-      (event.type === "keydown" && event.key === "Escape")
-    ) {
-      ["SettingsMsg", "NotificationsMsg", "StationMsg", "DataMsg"].forEach(
-        (msg) => {
-          dispatch({ type: msg, data: { type: "CheckEscape", data: event } });
-        },
-      );
-    }
+  if (checkEscape(model, event, dispatch)) {
+    [
+      "SettingsMsg",
+      "NotificationsMsg",
+      "StationMsg",
+      "DataMsg",
+      "CalibrationMsg",
+    ].forEach((msg) => {
+      dispatch({ type: msg, data: { type: "CheckEscape", data: event } });
+    });
   }
 }
 
 function dispatchSelectSection(section, dispatch) {
-  ["StationMsg", "DataMsg"].forEach((msg) => {
+  ["StationMsg", "DataMsg", "CalibrationMsg"].forEach((msg) => {
     dispatch({ type: msg, data: { type: "SelectSection", data: section } });
+  });
+}
+
+function dispatchUpdateStation(station, dispatch) {
+  dispatch({
+    type: "DataMsg",
+    data: {
+      type: "UpdateStation",
+      data: station,
+    },
+  });
+  dispatch({
+    type: "CalibrationMsg",
+    data: {
+      type: "UpdateStation",
+      data: station,
+    },
   });
 }
 
@@ -127,6 +157,7 @@ async function initView(model, dispatch) {
   );
   station.initView(model.station, dispatch);
   data.initView(model.data, dispatch);
+  calibration.initView(model.calibration, dispatch);
   document.body.addEventListener("click", (event) =>
     dispatch({ type: "CheckEscape", data: event }),
   );
@@ -157,6 +188,9 @@ function view(msg, model, dispatch) {
     case "DataMsg":
       data.view(model.data, dispatch);
       break;
+    case "CalibrationMsg":
+      calibration.view(model.calibration, dispatch);
+      break;
   }
   loadingView(model);
 }
@@ -167,7 +201,8 @@ function loadingView(model) {
     model.settings.loading ||
     model.notifications.loading ||
     model.station.loading ||
-    model.data.loading;
+    model.data.loading ||
+    model.calibration.loading;
   if (loading) {
     if (
       document.querySelector("link[rel~='icon']").href !==
@@ -222,6 +257,7 @@ async function init() {
     notifications.initialMsg,
     station.initialMsg,
     data.initialMsg,
+    calibration.initialMsg,
   ].forEach((msg) => {
     if (msg) {
       if (Array.isArray(msg)) {

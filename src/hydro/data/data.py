@@ -5,6 +5,16 @@ from hydro_rs import pet
 
 from hydro.utils import paths
 
+from .hydro import Metadata
+
+#########
+# types #
+#########
+
+PetModels = Literal["oudin"]
+SnowModels = Literal["cemaneige"]
+ClimateModels = Literal["gr4j", "bucket"]
+
 ##########
 # public #
 ##########
@@ -15,8 +25,8 @@ def create_datasets(
     hydro_data: pl.DataFrame,
     weather_data: pl.DataFrame,
     precipitation_data: pl.DataFrame,
-    hydro_metadata: dict[str, str | float],
-    pet_model: Literal[tuple(pet.Models)],  # type: ignore
+    hydro_metadata: Metadata,
+    pet_model: PetModels,
     n_valid_years: int,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     data = _read_joined_data(
@@ -67,8 +77,8 @@ def _read_joined_data(
 def _add_pet_data(
     station: str,
     data: pl.DataFrame,
-    hydro_metadata: dict[str, str | float],
-    pet_model: Literal[tuple(pet.Models)],  # type: ignore
+    hydro_metadata: Metadata,
+    pet_model: PetModels,
 ) -> pl.DataFrame:
     last_date = data[-1, "date"]
     path = (
@@ -88,7 +98,7 @@ def _add_pet_data(
                     data["date"].dt.ordinal_day().cast(pl.Float64).to_numpy()
                 )
                 pet_data_ = pet.oudin.simulate(
-                    temperature, day_of_year, float(hydro_metadata["lat"])
+                    temperature, day_of_year, hydro_metadata.lat
                 )
                 pet_data = pl.DataFrame(
                     {"date": data["date"], "pet": pet_data_}

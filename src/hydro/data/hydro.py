@@ -3,7 +3,7 @@ import json
 import re
 import zipfile
 from pathlib import Path
-from typing import Literal, assert_never
+from typing import Literal, NamedTuple, assert_never, cast
 
 import geopandas as gpd
 import httpx
@@ -14,7 +14,20 @@ import rasterio.mask
 
 from hydro.utils import paths
 
-# from .watershed import get_watershed_data
+#########
+# types #
+#########
+
+
+class Metadata(NamedTuple):
+    id: str
+    name: str
+    station: str
+    lat: float
+    lon: float
+    elevation_bands: list[float]
+    median_elevation: float
+
 
 ##########
 # public #
@@ -71,7 +84,7 @@ async def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
         return data
 
 
-async def read_metadata(id: str) -> dict[str, str | float]:
+async def read_metadata(id: str) -> Metadata:
     path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.json"
     if path.exists():
         with open(path, "r") as f:
@@ -82,14 +95,17 @@ async def read_metadata(id: str) -> dict[str, str | float]:
         if stations.shape[0] == 0:
             raise ValueError(f"Station with id {id} doesn't exist.")
         watershed_data = await _get_watershed_data(id)
-        metadata = {
-            "id": id,
-            "name": stations[0, "name"],
-            "station": stations[0, "station"],
-            "lat": stations[0, "lat"],
-            "lon": stations[0, "lon"],
-            **watershed_data,
-        }
+        metadata = Metadata(
+            id=id,
+            name=stations[0, "name"],
+            station=stations[0, "station"],
+            lat=stations[0, "lat"],
+            lon=stations[0, "lon"],
+            elevation_bands=cast(
+                list[float], watershed_data["elevation_bands"]
+            ),
+            median_elevation=float(watershed_data["median_elevation"]),
+        )
         with open(path, "w") as f:
             json.dump(metadata, f)
         return metadata

@@ -7,7 +7,7 @@ from starlette.staticfiles import StaticFiles
 
 from hydro.utils import paths
 
-from . import data, map, station
+from . import calibration, data, map, station
 
 #########
 # types #
@@ -33,6 +33,7 @@ def get_routes() -> list[BaseRoute]:
         Mount("/map", routes=map.get_routes()),
         Mount("/station", routes=station.get_routes()),
         Mount("/data", routes=data.get_routes()),
+        Mount("/calibration", routes=calibration.get_routes()),
     ]
 
 

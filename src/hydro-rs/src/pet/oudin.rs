@@ -1,13 +1,9 @@
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use std::f64::consts::PI;
 
-pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
-    let m = PyModule::new(py, "oudin")?;
-    m.add_function(wrap_pyfunction!(simulate, &m)?)?;
-    Ok(m)
-}
-
+#[gen_stub_pyfunction(module = "hydro_rs.pet.oudin")]
 #[pyfunction]
 fn simulate<'py>(
     py: Python<'py>,
@@ -40,4 +36,10 @@ fn simulate<'py>(
     }
 
     PyArray1::from_vec(py, potential_evapotranspiration)
+}
+
+pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
+    let m = PyModule::new(py, "oudin")?;
+    m.add_function(wrap_pyfunction!(simulate, &m)?)?;
+    Ok(m)
 }

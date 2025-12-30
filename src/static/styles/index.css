@@ -4,6 +4,7 @@
 @import "./notifications.css";
 @import "./station.css";
 @import "./data.css";
+@import "./calibration.css";
 
 body {
   display: grid;
@@ -16,6 +17,7 @@ body {
   gap: 2.5em;
   justify-content: center;
   padding: 2.5em 2.5em 1em 2.5em;
+  font-size: 0.9rem;
 
   & > div {
     background: oklch(var(--fg) / 0.1);

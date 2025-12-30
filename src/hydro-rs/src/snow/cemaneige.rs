@@ -1,12 +1,8 @@
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
-pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
-    let m = PyModule::new(py, "cemaneige")?;
-    m.add_function(wrap_pyfunction!(simulate, &m)?)?;
-    Ok(m)
-}
-
+#[gen_stub_pyfunction(module = "hydro_rs.snow.cemaneige")]
 #[pyfunction]
 fn simulate<'py>(
     py: Python<'py>,
@@ -26,4 +22,10 @@ fn simulate<'py>(
     }
 
     PyArray1::from_vec(py, effective_precipitation)
+}
+
+pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
+    let m = PyModule::new(py, "cemaneige")?;
+    m.add_function(wrap_pyfunction!(simulate, &m)?)?;
+    Ok(m)
 }

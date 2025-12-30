@@ -1,11 +1,16 @@
-from typing import Any
+from typing import Any, get_args
 
 import polars as pl
-from hydro_rs import pet, snow
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from hydro.data import create_datasets, hydro, precipitation, weather
+from hydro.data import (
+    PetModels,
+    create_datasets,
+    hydro,
+    precipitation,
+    weather,
+)
 from hydro.logging import logger
 
 from .utils import convert_for_json
@@ -56,7 +61,7 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
 
 
 async def _handle_models_message(ws: WebSocket) -> None:
-    models = {"pet": pet.Models, "snow": [*snow.Models, None]}
+    models = {"pet": get_args(PetModels)}
     await _send(ws, "models", convert_for_json(models))
 
 
@@ -69,12 +74,7 @@ async def _handle_model_message(
 
     match msg_data["type"]:
         case "pet":
-            if msg_data["val"] in pet.Models:
-                await _send(ws, "model", msg_data)
-        case "snow":
-            if msg_data["val"] == "" or msg_data["val"] is None:
-                await _send(ws, "model", None)
-            elif msg_data["val"] in snow.Models:
+            if msg_data["val"] in get_args(PetModels):
                 await _send(ws, "model", msg_data)
         case _:
             await _send(ws, "error", "The only valid types are pet and snow.")

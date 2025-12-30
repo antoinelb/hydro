@@ -41,9 +41,6 @@ export async function update(model, msg, dispatch, createNotification) {
       return model;
     case "SelectSection":
       const open = msg.data === "data";
-      if (open && model.map === null) {
-        dispatch({ type: "CreateMap" });
-      }
       return { ...model, open: open };
     case "UpdateStation":
       return { ...model, station: msg.data };
@@ -227,7 +224,6 @@ export function view(model, dispatch) {
 
   openView(model);
   metaView(model);
-  loadingView(model);
   formView(model);
   statsView(model);
   dataView(model.hydroData, "discharge", false, true);
@@ -244,8 +240,6 @@ function openView(model) {
     document.getElementById("data-main").classList.remove("open");
   }
 }
-
-function loadingView(model) {}
 
 function initMetaView(model, globalDispatch) {
   document.getElementById("meta").appendChild(
@@ -298,7 +292,7 @@ function initMainView(model, dispatch) {
         {},
         [
           create("label", { for: "data-selection__pet" }, [
-            "Évapotranspiration potentielle",
+            "Évapotranspiration potentielle:",
             create(
               "select",
               { id: "data-selection__pet", hidden: true },
@@ -317,7 +311,7 @@ function initMainView(model, dispatch) {
             ),
           ]),
           create("label", { for: "data-selection__val-years" }, [
-            "Années validation",
+            "Années validation:",
             create(
               "input",
               {
