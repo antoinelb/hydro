@@ -12,9 +12,9 @@ export function initModel() {
     ws: null,
     map: null,
     stations: null,
-    currentStation: window.localStorage.getItem("current-station")
+    station: window.localStorage.getItem("station")
       ? {
-          station: window.localStorage.getItem("current-station"),
+          station: window.localStorage.getItem("station"),
           lat: null,
           lon: null,
         }
@@ -67,8 +67,8 @@ export async function update(model, msg, dispatch, createNotification) {
       getStations(model.ws);
       return model;
     case "GotStations":
-      if (model.currentStation !== null && model.currentStation.lat === null) {
-        dispatch({ type: "UpdateStation", data: model.currentStation.station });
+      if (model.station !== null && model.station.lat === null) {
+        dispatch({ type: "UpdateStation", data: model.station.station });
       }
       return {
         ...model,
@@ -78,19 +78,19 @@ export async function update(model, msg, dispatch, createNotification) {
       updateStation(model.ws, msg.data);
       return model;
     case "UpdatedStation":
-      const currentStation = {
+      const station = {
         station: msg.data.station,
         lat: msg.data.lat,
         lon: msg.data.lon,
       };
-      window.localStorage.setItem("current-station", currentStation.station);
+      window.localStorage.setItem("station", station.station);
       document.getElementById("station-selection__station").value = "";
       document.getElementById("station-selection__n-years").value =
         document.getElementById("station-selection__n-years").min;
       dispatch({ type: "GetStations" });
       return {
         ...model,
-        currentStation: currentStation,
+        station: station,
       };
     default:
       return model;
@@ -160,7 +160,6 @@ export function view(model, dispatch) {
 
   openView(model);
   metaView(model);
-  loadingView(model);
   autocompleteView(model, dispatch);
 
   if (model.map) {
@@ -181,8 +180,6 @@ function openView(model) {
     document.getElementById("station-main").classList.remove("open");
   }
 }
-
-function loadingView(model) {}
 
 function initMetaView(model, globalDispatch) {
   document.getElementById("meta").appendChild(
@@ -254,12 +251,12 @@ function initMainView(model, dispatch) {
 }
 
 function metaView(model) {
-  if (model.currentStation !== null) {
+  if (model.station !== null) {
     document.getElementById("station__station").textContent =
-      model.currentStation.station;
-    if (model.currentStation.lat !== null) {
+      model.station.station;
+    if (model.station.lat !== null) {
       document.getElementById("station__lat-lon").textContent =
-        `(${model.currentStation.lat.toFixed(3)}, ${model.currentStation.lon.toFixed(3)})`;
+        `(${model.station.lat.toFixed(3)}, ${model.station.lon.toFixed(3)})`;
     }
   }
 }
@@ -284,8 +281,7 @@ function mapView(model, dispatch) {
         enter
           .append("div")
           .attr("class", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? "map__marker map__marker--current"
               : "map__marker",
           )
@@ -296,14 +292,12 @@ function mapView(model, dispatch) {
               `translate(${model.map.latLngToLayerPoint([d.lat, d.lon]).x}px, ${model.map.latLngToLayerPoint([d.lat, d.lon]).y}px)`,
           )
           .style("width", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
           .style("height", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
@@ -316,20 +310,17 @@ function mapView(model, dispatch) {
       (update) =>
         update
           .attr("class", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? "map__marker map__marker--current"
               : "map__marker",
           )
           .style("width", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           )
           .style("height", (d) =>
-            model.currentStation !== null &&
-            d.station === model.currentStation.station
+            model.station !== null && d.station === model.station.station
               ? `${10 + (model.map._zoom - 6) * 2}px`
               : `${5 + (model.map._zoom - 6) * 2}px`,
           ),
@@ -343,14 +334,12 @@ function mapView(model, dispatch) {
           `translate(${model.map.latLngToLayerPoint([d.lat, d.lon]).x}px, ${model.map.latLngToLayerPoint([d.lat, d.lon]).y}px)`,
       )
       .style("width", (d) =>
-        model.currentStation !== null &&
-        d.station === model.currentStation.station
+        model.station !== null && d.station === model.station.station
           ? `${10 + (model.map._zoom - 6) * 2}px`
           : `${5 + (model.map._zoom - 6) * 2}px`,
       )
       .style("height", (d) =>
-        model.currentStation !== null &&
-        d.station === model.currentStation.station
+        model.station !== null && d.station === model.station.station
           ? `${10 + (model.map._zoom - 6) * 2}px`
           : `${5 + (model.map._zoom - 6) * 2}px`,
       );

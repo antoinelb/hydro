@@ -3,7 +3,12 @@ from typing import Any, get_args
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from hydro.data import ClimateModels, SnowModels, calibration
+from hydro.data import (
+    ClimateModels,
+    SnowModels,
+    calibration,
+    read_datasets,
+)
 from hydro.logging import logger
 
 from .utils import convert_for_json
@@ -39,6 +44,8 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
     match msg.get("type"):
         case "models":
             await _handle_models_message(ws)
+        case "observations":
+            await _handle_observations_message(ws, msg.get("data", {}))
 
 
 async def _handle_models_message(ws: WebSocket) -> None:
@@ -53,6 +60,31 @@ async def _handle_models_message(ws: WebSocket) -> None:
         },
     }
     await _send(ws, "models", convert_for_json(models))
+
+
+async def _handle_observations_message(
+    ws: WebSocket, msg_data: dict[str, Any]
+) -> None:
+    if any(
+        key not in msg_data
+        for key in ("station", "pet_model", "n_valid_years")
+    ):
+        await _send(
+            ws,
+            "error",
+            "The `station`, `pet_model` and `n_valid_years` must be provided.",
+        )
+        return
+
+    # station is in the format `<name> (<id>)`
+    id = msg_data["station"].split()[-1][1:-1]
+    calib_data, _ = await read_datasets(
+        id, msg_data["pet_model"], msg_data["n_valid_years"]
+    )
+
+    observations = calib_data.select("date", "discharge")
+
+    await _send(ws, "observations", convert_for_json(observations))
 
 
 ###########

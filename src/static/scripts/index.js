@@ -71,12 +71,6 @@ async function update(model, msg, dispatch) {
         dispatch,
         createNotification,
       );
-      if (
-        _station.currentStation !== null &&
-        _station.currentStation.station !== model.data.station
-      ) {
-        dispatchUpdateStation(_station.currentStation.station, dispatch);
-      }
       return {
         ...model,
         station: _station,
@@ -89,6 +83,7 @@ async function update(model, msg, dispatch) {
           msg.data,
           dispatch,
           createNotification,
+          model.station.station === null ? null : model.station.station.station,
         ),
       };
     case "CalibrationMsg":
@@ -99,6 +94,9 @@ async function update(model, msg, dispatch) {
           msg.data,
           dispatch,
           createNotification,
+          model.station.station === null ? null : model.station.station.station,
+          model.data.petModel,
+          model.data.nValidYears,
         ),
       };
     default:
@@ -123,23 +121,6 @@ function dispathCheckEscape(model, event, dispatch) {
 function dispatchSelectSection(section, dispatch) {
   ["StationMsg", "DataMsg", "CalibrationMsg"].forEach((msg) => {
     dispatch({ type: msg, data: { type: "SelectSection", data: section } });
-  });
-}
-
-function dispatchUpdateStation(station, dispatch) {
-  dispatch({
-    type: "DataMsg",
-    data: {
-      type: "UpdateStation",
-      data: station,
-    },
-  });
-  dispatch({
-    type: "CalibrationMsg",
-    data: {
-      type: "UpdateStation",
-      data: station,
-    },
   });
 }
 

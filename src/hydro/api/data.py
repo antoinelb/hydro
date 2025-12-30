@@ -6,9 +6,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from hydro.data import (
     PetModels,
-    create_datasets,
     hydro,
     precipitation,
+    read_datasets,
     weather,
 )
 from hydro.logging import logger
@@ -160,31 +160,14 @@ async def _handle_datasets_message(
         await _send(
             ws,
             "error",
-            "The `station`, `pet_model`, `snow_model` and `n_valid_years` must be provided.",
+            "The `station`, `pet_model` and `n_valid_years` must be provided.",
         )
         return
 
     # station is in the format `<name> (<id>)`
     id = msg_data["station"].split()[-1][1:-1]
-    hydro_data = await hydro.read_data(
-        id, refresh=msg_data.get("refresh", False)
-    )
-    hydro_metadata = await hydro.read_metadata(id)
-    weather_data = await weather.read_closest_data(
-        hydro_data, refresh=msg_data.get("refresh", False)
-    )
-    precipitation_data = await precipitation.read_data(
-        hydro_data, refresh=msg_data.get("refresh", False)
-    )
-
-    calib_data, valid_data = create_datasets(
-        id,
-        hydro_data,
-        weather_data,
-        precipitation_data,
-        hydro_metadata,
-        msg_data["pet_model"],
-        msg_data["n_valid_years"],
+    calib_data, valid_data = await read_datasets(
+        id, msg_data["pet_model"], msg_data["n_valid_years"]
     )
 
     await _send(

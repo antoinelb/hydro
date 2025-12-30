@@ -88,7 +88,8 @@ async def read_metadata(id: str) -> Metadata:
     path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.json"
     if path.exists():
         with open(path, "r") as f:
-            return json.load(f)
+            metadata = json.load(f)
+            return Metadata(*metadata)
     else:
         stations = read_stations()
         stations = stations.filter(pl.col("id") == id)

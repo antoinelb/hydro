@@ -5,7 +5,7 @@ from hydro_rs import pet
 
 from hydro.utils import paths
 
-from .hydro import Metadata
+from . import hydro, precipitation, weather
 
 #########
 # types #
@@ -20,19 +20,15 @@ ClimateModels = Literal["gr4j", "bucket"]
 ##########
 
 
-def create_datasets(
-    station: str,
-    hydro_data: pl.DataFrame,
-    weather_data: pl.DataFrame,
-    precipitation_data: pl.DataFrame,
-    hydro_metadata: Metadata,
+async def read_datasets(
+    id: str,
     pet_model: PetModels,
     n_valid_years: int,
+    *,
+    refresh: bool = False,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
-    data = _read_joined_data(
-        station, hydro_data, weather_data, precipitation_data
-    )
-    data = _add_pet_data(station, data, hydro_metadata, pet_model)
+    data = await _read_joined_data(id, refresh=refresh)
+    data = await _add_pet_data(id, data, pet_model, refresh=refresh)
     year_threshold = data["date"].dt.year().unique().sort()[-n_valid_years - 1]
     calib_data = data.filter(pl.col("date").dt.year() < year_threshold)
     valid_data = data.filter(pl.col("date").dt.year() >= year_threshold)
@@ -44,27 +40,24 @@ def create_datasets(
 ###########
 
 
-def _read_joined_data(
-    station: str,
-    hydro_data: pl.DataFrame,
-    weather_data: pl.DataFrame,
-    precipitation_data: pl.DataFrame,
-) -> pl.DataFrame:
-    last_date = max(
-        hydro_data[-1, "date"],
-        weather_data[-1, "date"],
-        precipitation_data[-1, "date"],
-    )
-    path = (
-        paths.data_dir
-        / "transformed"
-        / "joined"
-        / f"{station}_{last_date}.ipc"
-    )
-    if path.exists():
+async def _read_joined_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
+    path = paths.data_dir / "transformed" / "joined" / f"{id}.ipc"
+    if path.exists() and not refresh:
         return pl.read_ipc(path)
     else:
         path.parent.mkdir(exist_ok=True, parents=True)
+        hydro_data = await hydro.read_data(id, refresh=refresh)
+        weather_data = await weather.read_closest_data(
+            hydro_data, refresh=refresh
+        )
+        precipitation_data = await precipitation.read_data(
+            hydro_data, refresh=refresh
+        )
+        data = (
+            hydro_data.join(weather_data, on="date")
+            .join(precipitation_data, on="date")
+            .sort("date")
+        )
         data = (
             hydro_data.join(weather_data, on="date")
             .join(precipitation_data, on="date")
@@ -74,23 +67,21 @@ def _read_joined_data(
         return data
 
 
-def _add_pet_data(
-    station: str,
+async def _add_pet_data(
+    id: str,
     data: pl.DataFrame,
-    hydro_metadata: Metadata,
     pet_model: PetModels,
+    *,
+    refresh: bool = False,
 ) -> pl.DataFrame:
-    last_date = data[-1, "date"]
     path = (
-        paths.data_dir
-        / "transformed"
-        / "features"
-        / f"{station}_{last_date}_{pet_model}.ipc"
+        paths.data_dir / "transformed" / "features" / f"{id}_{pet_model}.ipc"
     )
-    if path.exists():
+    if path.exists() and not refresh:
         pet_data = pl.read_ipc(path)
     else:
         path.parent.mkdir(exist_ok=True, parents=True)
+        hydro_metadata = await hydro.read_metadata(id)
         match (pet_model):
             case "oudin":
                 temperature = data["temperature"].to_numpy()

@@ -11,10 +11,9 @@ export function initModel() {
     loading: false,
     open: false,
     ws: null,
-    station: null,
     petModels: null,
     petModel: window.localStorage.getItem("pet_model") || "oudin",
-    nValYears: parseInt(window.localStorage.getItem("n_val_years") || "5"),
+    nValidYears: parseInt(window.localStorage.getItem("n_val_years") || "5"),
     hydroData: null,
     weatherData: null,
     precipitationData: null,
@@ -34,7 +33,13 @@ export const initialMsg = [
 /* update */
 /**********/
 
-export async function update(model, msg, dispatch, createNotification) {
+export async function update(
+  model,
+  msg,
+  dispatch,
+  createNotification,
+  station,
+) {
   dispatch = createDispatch(dispatch);
   switch (msg.type) {
     case "CheckEscape":
@@ -42,8 +47,6 @@ export async function update(model, msg, dispatch, createNotification) {
     case "SelectSection":
       const open = msg.data === "data";
       return { ...model, open: open };
-    case "UpdateStation":
-      return { ...model, station: msg.data };
     case "Connect":
       connect("data/", handleMessage, dispatch, createNotification);
       return { ...model, loading: true };
@@ -51,10 +54,10 @@ export async function update(model, msg, dispatch, createNotification) {
       if (model.petModels === null) {
         dispatch({ type: "GetModels" });
       }
-      if (model.station !== null && model.hydroData === null) {
+      if (model.hydroData === null) {
         dispatch({
           type: "GetData",
-          data: { station: model.station, type: "hydro" },
+          data: "hydro",
         });
       }
       return { ...model, loading: false, ws: msg.data };
@@ -104,29 +107,31 @@ export async function update(model, msg, dispatch, createNotification) {
       return model;
     case "UpdatedValidationYears":
       window.localStorage.setItem("n_val_years", msg.data.toString());
-      model = { ...model, nValYears: msg.data };
+      model = { ...model, nValidYears: msg.data };
       getDatasets(model, dispatch);
       return model;
     case "GetData":
-      if (model.ws?.readyState === WebSocket.OPEN) {
+      if (model.ws?.readyState === WebSocket.OPEN && station !== null) {
         model.ws.send(
           JSON.stringify({
-            type: `${msg.data.type}_data`,
-            data: { station: msg.data.station },
+            type: `${msg.data}_data`,
+            data: { station: station },
           }),
         );
+      } else {
+        setTimeout(() => dispatch(msg), 1000);
       }
       return { ...model, loading: true };
     case "GotHydroData":
       dispatch({
         type: "GetData",
-        data: { station: model.station, type: "weather" },
+        data: "weather",
       });
       return { ...model, loading: false, hydroData: msg.data };
     case "GotWeatherData":
       dispatch({
         type: "GetData",
-        data: { station: model.station, type: "precipitation" },
+        data: "precipitation",
       });
       return { ...model, loading: false, weatherData: msg.data };
     case "GotPrecipitationData":
@@ -134,14 +139,14 @@ export async function update(model, msg, dispatch, createNotification) {
       getDatasets(model, dispatch);
       return model;
     case "GetDatasets":
-      if (model.ws?.readyState === WebSocket.OPEN) {
+      if (model.ws?.readyState === WebSocket.OPEN && station) {
         model.ws.send(
           JSON.stringify({
             type: "datasets",
             data: {
-              station: model.station,
+              station: station,
               pet_model: model.petModel,
-              n_valid_years: model.nValYears,
+              n_valid_years: model.nValidYears,
             },
           }),
         );
@@ -202,7 +207,7 @@ function getDatasets(model, dispatch) {
     model.weatherData !== null &&
     model.precipitationData !== null &&
     model.petModel !== null &&
-    model.nValYears !== null
+    model.nValidYears !== null
   ) {
     dispatch({ type: "GetDatasets" });
   }
@@ -317,7 +322,7 @@ function initMainView(model, dispatch) {
               {
                 id: "data-selection__val-years",
                 type: "number",
-                value: model.nValYears.toString(),
+                value: model.nValidYears.toString(),
                 min: "0",
               },
               [],
@@ -371,7 +376,7 @@ function metaView(model) {
     );
   }
 
-  document.getElementById("data__val-years").textContent = model.nValYears;
+  document.getElementById("data__val-years").textContent = model.nValidYears;
 }
 
 function formView(model) {

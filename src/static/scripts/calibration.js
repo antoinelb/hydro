@@ -11,6 +11,7 @@ export function initModel() {
     loading: false,
     open: true,
     ws: null,
+    running: false,
     station: null,
     snowModels: null,
     availableModels: null,
@@ -29,6 +30,7 @@ export function initModel() {
     transformation: window.localStorage.getItem("transformation") || null,
     algorithm: window.localStorage.getItem("algorithm") || null,
     algorithmParams: null,
+    observations: null,
   };
 }
 
@@ -43,8 +45,18 @@ export const initialMsg = [
 /* update */
 /**********/
 
-export async function update(model, msg, dispatch, createNotification) {
+export async function update(
+  model,
+  msg,
+  dispatch,
+  createNotification,
+  station,
+  petModel,
+  nValidYears,
+) {
   dispatch = createDispatch(dispatch);
+  const configValid =
+    station !== null && petModel !== null && nValidYears !== null;
   switch (msg.type) {
     case "CheckEscape":
       return model;
@@ -59,6 +71,9 @@ export async function update(model, msg, dispatch, createNotification) {
     case "Connected":
       if (model.snowModels === null || model.availableModels) {
         dispatch({ type: "GetModels" });
+      }
+      if (model.observations === null) {
+        dispatch({ type: "GetObservations" });
       }
       return { ...model, loading: false, ws: msg.data };
     case "Disconnected":
@@ -80,9 +95,18 @@ export async function update(model, msg, dispatch, createNotification) {
         });
       }
       if (model.algorithm === null) {
-        dispatch({ type: "UpdateAlgorithm", data: msg.data.algorithms[0] });
+        dispatch({
+          type: "UpdateAlgorithm",
+          data: Object.keys(msg.data.algorithms)[0],
+        });
       } else {
         dispatch({ type: "UpdateAlgorithm", data: model.algorithm });
+      }
+      if (model.models.length === 0) {
+        dispatch({
+          type: "UpdateModels",
+          data: { model: msg.data.climate[0], checked: true },
+        });
       }
       return {
         ...model,
@@ -149,6 +173,55 @@ export async function update(model, msg, dispatch, createNotification) {
           },
         };
       }
+    case "StartCalibration":
+      if (model.ws?.readyState === WebSocket.OPEN && configValid) {
+        model.ws.send(
+          JSON.stringify({
+            type: "calibration_start",
+            data: {
+              station: station,
+              pet_model: petModel,
+              n_valid_years: nValidYears,
+              models: model.models,
+              snow_model: model.snowModel,
+              objective: model.objective,
+              transformation: model.transformation,
+              algorithm: model.algorithm,
+              algorithm_params: model.algorithmParams,
+            },
+          }),
+        );
+      } else {
+        setTimeout(() => dispatch(msg), 1000);
+      }
+      return { ...model, loading: true, running: true };
+    case "StopCalibration":
+      if (model.ws?.readyState === WebSocket.OPEN) {
+        model.ws.send(
+          JSON.stringify({
+            type: "calibration_stop",
+          }),
+        );
+      }
+      return { ...model, loading: false, running: false };
+    case "GetObservations":
+      if (model.ws?.readyState === WebSocket.OPEN && configValid) {
+        model.ws.send(
+          JSON.stringify({
+            type: "observations",
+            data: {
+              station: station,
+              pet_model: petModel,
+              n_valid_years: nValidYears,
+            },
+          }),
+        );
+      } else {
+        setTimeout(() => dispatch(msg), 1000);
+      }
+      return { ...model, loading: true };
+    case "GotObservations":
+      return { ...model, loading: false, observations: msg.data };
     default:
       return model;
   }
@@ -166,6 +239,9 @@ function handleMessage(event, dispatch, createNotification) {
       break;
     case "models":
       dispatch({ type: "GotModels", data: msg.data });
+      break;
+    case "observations":
+      dispatch({ type: "GotObservations", data: msg.data });
       break;
     default:
       createNotification("Unknown websocket message", true);
@@ -190,6 +266,7 @@ export function view(model, dispatch) {
   openView(model);
   metaView(model);
   formView(model, dispatch);
+  calibrationView(model, dispatch);
 }
 
 function openView(model) {
@@ -344,9 +421,48 @@ function initMainView(model, dispatch) {
                 [],
               ),
             ]),
+            create("div", { class: "break" }),
+            create(
+              "button",
+              { id: "calibration_start-button" },
+              ["Partir calibration"],
+              [
+                {
+                  event: "click",
+                  fct: () => {
+                    dispatch({ type: "StartCalibration" });
+                  },
+                },
+              ],
+            ),
+            create(
+              "button",
+              { id: "calibration_stop-button", hidden: true },
+              ["Arrêter calibration"],
+              [
+                {
+                  event: "click",
+                  fct: () => {
+                    dispatch({ type: "StopCalibration" });
+                  },
+                },
+              ],
+            ),
           ],
           [{ event: "submit", fct: (event) => event.preventDefault() }],
         ),
+        create("div", { id: "calibration-main__plots" }, [
+          create("div", { id: "calibration-main__legend" }, [
+            create("div", {}, [
+              create("span", {}, ["Observations"]),
+              create("span", { class: "blue" }),
+            ]),
+          ]),
+          create("svg", { id: "calibration-main__discharge", class: "plot" }),
+          create("svg", { id: "calibration-main__rmse", class: "plot" }),
+          create("svg", { id: "calibration-main__nse", class: "plot" }),
+          create("svg", { id: "calibration-main__kge", class: "plot" }),
+        ]),
       ],
     ),
   );
@@ -516,3 +632,120 @@ function addAlgorithmOptions(model, dispatch) {
     clear(div);
   }
 }
+
+function calibrationView(model, dispatch) {
+  if (model.running) {
+    document
+      .getElementById("calibration_start-button")
+      .setAttribute("hidden", true);
+    document
+      .getElementById("calibration_stop-button")
+      .removeAttribute("hidden");
+  } else {
+    document
+      .getElementById("calibration_start-button")
+      .removeAttribute("hidden");
+    document
+      .getElementById("calibration_stop-button")
+      .setAttribute("hidden", true);
+  }
+
+  legendView(model, dispatch);
+  dischargeView(model);
+  rmseView(model);
+  nseView(model);
+  kseView(model);
+}
+
+function legendView(model, dispatch) {}
+
+function dischargeView(model) {
+  const _svg = document.getElementById("calibration-main__discharge");
+  clear(_svg);
+  if (model.observations === null) {
+    _svg.setAttribute("hidden", true);
+  } else {
+    _svg.removeAttribute("hidden");
+    const width = _svg.clientWidth;
+    const height = _svg.clientHeight;
+    _svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+
+    const boundaries = {
+      l: 50,
+      r: width - 25,
+      t: 5,
+      b: height - 50,
+    };
+
+    const svg = d3.select(_svg);
+
+    const observations = model.observations;
+
+    const xScale = d3
+      .scaleTime()
+      .domain(d3.extent(observations, (d) => new Date(d.date)))
+      .range([boundaries.l, boundaries.r]);
+    const yScale = d3
+      .scaleLinear()
+      .domain([
+        d3.min(observations, (d) => d.discharge),
+        d3.max(observations, (d) => d.discharge),
+      ])
+      .range([boundaries.b, boundaries.t]);
+
+    // x axis
+    const xAxis = svg
+      .append("g")
+      .attr("class", "x-axis")
+      .attr("transform", `translate(0, ${boundaries.b})`)
+      .call(d3.axisBottom(xScale).tickFormat(frenchLocale.format("%Y")));
+    xAxis
+      .selectAll("text")
+      .attr("transform", "rotate(-45)")
+      .attr("text-anchor", "end")
+      .attr("dx", "-0.5em")
+      .attr("dy", "0.5em");
+    // y axis
+    svg
+      .append("g")
+      .attr("class", "y-axis")
+      .attr("transform", `translate(${boundaries.l}, 0)`)
+      .call(
+        d3
+          .axisLeft(yScale)
+          .ticks(5)
+          .tickFormat((x) => formatNumber(x)),
+      );
+    svg
+      .append("text")
+      .attr("x", 15)
+      .attr("y", (boundaries.t + boundaries.b) / 2)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr(
+        "transform",
+        `rotate(-90, 15, ${(boundaries.t + boundaries.b) / 2})`,
+      )
+      .attr("font-size", "0.9rem")
+      .text("Débit");
+
+    // current data
+    svg
+      .append("path")
+      .attr("class", "blue")
+      .datum(observations)
+      .attr(
+        "d",
+        d3
+          .line()
+          .x((d) => xScale(new Date(d.date)))
+          .y((d) => yScale(d.discharge)),
+      );
+  }
+}
+
+function rmseView(model) {}
+
+function nseView(model) {}
+
+function kseView(model) {}

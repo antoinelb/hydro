@@ -40,11 +40,14 @@
   & form {
     background: oklch(var(--fg) / 0.1);
     border-radius: 0.5em;
+    column-gap: 2em;
     display: flex;
     flex-direction: row;
-    gap: 2em;
+    flex-wrap: wrap;
+    justify-content: center;
     margin: 1em 2em;
     padding: 0.5em 1em;
+    row-gap: 0.5em;
 
     & div:nth-child(1) {
       column-gap: 2em;
@@ -73,16 +76,16 @@
       row-gap: 1em;
 
       & #calibration-selection__algorithm-params {
+        column-gap: 1em;
         display: grid;
         grid-column: 1 / -1;
         grid-template-columns: repeat(4, max-content);
-        column-gap: 1em;
-        row-gap: 0.5em;
         justify-self: end;
+        row-gap: 0.5em;
 
         & label {
-          padding-left: 1em;
           font-size: 0.9rem;
+          padding-left: 1em;
         }
         & input {
           font-size: 0.9rem;
@@ -126,6 +129,78 @@
         border-bottom: 1px solid oklch(var(--theme-most));
         outline: none;
       }
+    }
+
+    & button {
+      font-size: 1rem;
+
+      &#calibration_start-button {
+        background: oklch(var(--correct));
+        box-shadow: 0 0.5em 1em 0.25em oklch(var(--correct) / 0.25);
+      }
+
+      &#calibration_stop-button {
+        background: oklch(var(--error));
+        box-shadow: 0 0.5em 1em 0.25em oklch(var(--error) / 0.25);
+      }
+      &[hidden] {
+        display: none;
+      }
+    }
+  }
+
+  & #calibration-main__plots {
+    display: grid;
+    grid-template-columns: 5fr 1fr;
+    grid-template-rows: 3em 1fr 1fr 1fr;
+    height: 100%;
+    min-height: 0;
+
+    & .plot {
+      display: block;
+      grid-column: 2;
+      height: 100%;
+      min-height: 0;
+      width: 100%;
+
+      & path {
+        fill: none;
+        stroke-width: 0.5px;
+      }
+
+      & text {
+        fill: oklch(var(--fg));
+      }
+    }
+
+    & #calibration-main__legend {
+      display: flex;
+      flex-wrap: wrap;
+      grid-column: 1 / -1;
+      grid-row: 1;
+      justify-content: space-evenly;
+      padding: 0 1em;
+
+      & div {
+        align-items: center;
+        display: flex;
+        gap: 0.5em;
+
+        & span:nth-child(2) {
+          height: 2px;
+          width: 3em;
+        }
+      }
+    }
+
+    & #calibration-main__discharge {
+      grid-column: 1;
+      grid-row: 2 / -1;
+    }
+
+    .blue {
+      background: oklch(0.56 0.2 265);
+      stroke: oklch(0.56 0.2 265);
     }
   }
 }

@@ -74,7 +74,7 @@ async def _handle_station_message(ws: WebSocket, msg_data: str | None) -> None:
 
     try:
         metadata = await hydro.read_metadata(id)
-        await _send(ws, "station", metadata)
+        await _send(ws, "station", metadata._asdict())
     except ValueError as exc:
         await _send(ws, "error", str(exc))
 

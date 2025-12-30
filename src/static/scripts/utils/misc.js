@@ -1,6 +1,6 @@
 export const frenchLocale = d3.timeFormatLocale({
   dateTime: "%A %e %B %Y à %X",
-  date: "%d/%m/%Y",
+  date: "%Y-%m-%d",
   time: "%H:%M:%S",
   periods: ["", ""],
   days: [
