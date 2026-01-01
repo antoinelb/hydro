@@ -59,7 +59,7 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
                     for algorithm in get_args(calibration.Algorithms)
                 },
             }
-            await _send(ws, "models", convert_for_json(models))
+            await _send(ws, "models", models)
         case "observations":
             await _handle_observations_message(ws, msg.get("data", {}))
         case "calibration_start":
@@ -114,10 +114,31 @@ async def _handle_observations_message(
     calib_data, _ = await read_datasets(
         id, msg_data["pet_model"], msg_data["n_valid_years"]
     )
+    metadata = await hydro.read_metadata(id)
+
+    model = climate.get_model("day_median")
+    model = await model.calibrate(calib_data, metadata)
+    _predictions = model(calib_data)
+    predictions = calib_data.select("date").with_columns(
+        pl.Series("discharge", _predictions)
+    )
+    results = climate.evaluate_model(
+        calib_data["discharge"].to_numpy(), _predictions
+    )
 
     observations = calib_data.select("date", "discharge")
 
-    await _send(ws, "observations", convert_for_json(observations))
+    await _send(
+        ws,
+        "observations",
+        {
+            "observations": observations,
+            "day_median": {
+                "predictions": predictions,
+                "results": results,
+            },
+        },
+    )
 
 
 async def _handle_calibration_start_message(
@@ -152,10 +173,8 @@ async def _handle_calibration_start_message(
             {
                 "done": done,
                 "model": msg_data["climate_model"],
-                # "predictions": [1, 2, 3],
-                # "results": {"rmse": 0.5},
-                "predictions": convert_for_json(predictions),
-                "results": convert_for_json(results),
+                "predictions": predictions,
+                "results": results,
             },
         )
 
@@ -170,4 +189,4 @@ async def _handle_calibration_start_message(
 
 
 async def _send(ws: WebSocket, event: str, data: Any) -> None:
-    await ws.send_json({"type": event, "data": data})
+    await ws.send_json({"type": event, "data": convert_for_json(data)})

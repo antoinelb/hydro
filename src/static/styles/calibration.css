@@ -152,13 +152,14 @@
   & #calibration-main__plots {
     display: grid;
     grid-template-columns: 5fr 1fr;
-    grid-template-rows: 3em 1fr 1fr 1fr;
+    grid-template-rows: repeat(6, 1fr);
     height: 100%;
     min-height: 0;
 
     & .plot {
       display: block;
       grid-column: 2;
+      grid-row: auto / span 2;
       height: 100%;
       min-height: 0;
       width: 100%;
@@ -176,7 +177,7 @@
     & #calibration-main__legend {
       display: flex;
       flex-wrap: wrap;
-      grid-column: 1 / -1;
+      grid-column: 1;
       grid-row: 1;
       justify-content: space-evenly;
       padding: 0 1em;
@@ -199,8 +200,50 @@
     }
 
     .blue {
-      background: oklch(0.56 0.2 265);
-      stroke: oklch(0.56 0.2 265);
+      background: oklch(0.56 0.2 260);
+      stroke: oklch(0.56 0.2 260);
+      fill: oklch(0.56 0.2 260);
+    }
+
+    .red {
+      background: oklch(0.56 0.2 20);
+      stroke: oklch(0.56 0.2 20);
+      fill: oklch(0.56 0.2 20);
+    }
+
+    .purple {
+      background: oklch(0.56 0.2 300);
+      stroke: oklch(0.56 0.2 300);
+      fill: oklch(0.56 0.2 300);
+    }
+    .pink {
+      background: oklch(0.56 0.2 0);
+      stroke: oklch(0.56 0.2 0);
+      fill: oklch(0.56 0.2 0);
+    }
+
+    .orange {
+      background: oklch(0.56 0.2 40);
+      stroke: oklch(0.56 0.2 40);
+      fill: oklch(0.56 0.2 40);
+    }
+
+    .yellow {
+      background: oklch(0.56 0.2 80);
+      stroke: oklch(0.56 0.2 80);
+      fill: oklch(0.56 0.2 80);
+    }
+
+    .green {
+      background: oklch(0.56 0.2 140);
+      stroke: oklch(0.56 0.2 140);
+      fill: oklch(0.56 0.2 140);
+    }
+
+    .turquoise {
+      background: oklch(0.56 0.2 180);
+      stroke: oklch(0.56 0.2 180);
+      fill: oklch(0.56 0.2 180);
     }
   }
 }

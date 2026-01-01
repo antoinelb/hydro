@@ -47,11 +47,8 @@ class DayMedianClimateModel(ClimateModel):
         data: pl.DataFrame,
         metadata: Metadata,
         *,
-        callback: (
-            Callable[[bool, pl.DataFrame, dict[str, float]], Awaitable[None]]
-            | None
-        ) = None,
-        stop_event: asyncio.Event | None = None,
+        callback: None = None,
+        stop_event: None = None,
     ) -> Self:
         self._medians = (
             data.select(
@@ -74,14 +71,7 @@ class DayMedianClimateModel(ClimateModel):
             )
         )
         if callback is not None:
-            _predictions = self.__call__(data)
-            predictions = data.select("date").with_columns(
-                pl.Series("discharge", _predictions)
-            )
-            results = evaluate_model(
-                data["discharge"].to_numpy(), _predictions
-            )
-            await callback(done=True, predictions=predictions, results=results)
+            raise ValueError()
         return self
 
     def __call__(self, data: pl.DataFrame) -> npt.NDArray[np.float64]:
@@ -127,16 +117,7 @@ class Gr4jClimateModel(ClimateModel):
                 break
             await asyncio.sleep(1)
             if callback is not None:
-                _predictions = self.__call__(data)
-                predictions = data.select("date").with_columns(
-                    pl.Series("discharge", _predictions)
-                )
-                results = evaluate_model(
-                    data["discharge"].to_numpy(), _predictions
-                )
-                await callback(
-                    done=False, predictions=predictions, results=results
-                )
+                await _evaluate_calibration_step(self, data, callback)
         return self
 
     def __call__(self, data: pl.DataFrame) -> npt.NDArray[np.float64]:
@@ -166,3 +147,23 @@ def evaluate_model(
     nse = hydro_rs.utils.calculate_nse(observations, predictions)
     kge = hydro_rs.utils.calculate_kge(observations, predictions)
     return {"rmse": rmse, "nse": nse, "kge": kge}
+
+
+###########
+# private #
+###########
+
+
+async def _evaluate_calibration_step(
+    model: ClimateModel,
+    data: pl.DataFrame,
+    callback: Callable[
+        [bool, pl.DataFrame, dict[str, float]], Awaitable[None]
+    ],
+) -> None:
+    _predictions = model(data)
+    predictions = data.select("date").with_columns(
+        pl.Series("discharge", _predictions)
+    )
+    results = evaluate_model(data["discharge"].to_numpy(), _predictions)
+    await callback(done=False, predictions=predictions, results=results)

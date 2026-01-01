@@ -1,6 +1,6 @@
 import { create, clear, createCheckbox } from "./utils/elements.js";
 import { connect } from "./utils/ws.js";
-import { toTitle, formatNumber, frenchLocale } from "./utils/misc.js";
+import { toTitle, formatNumber, frenchLocale, round } from "./utils/misc.js";
 
 /*********/
 /* model */
@@ -11,6 +11,16 @@ export function initModel() {
     loading: false,
     open: true,
     ws: null,
+    colours: [
+      "blue",
+      "green",
+      "red",
+      "purple",
+      "orange",
+      "pink",
+      "turquoise",
+      "yellow",
+    ],
     running: false,
     station: null,
     snowModels: null,
@@ -260,7 +270,15 @@ export async function update(
       }
       return { ...model, loading: true };
     case "GotObservations":
-      return { ...model, loading: false, observations: msg.data };
+      return {
+        ...model,
+        loading: false,
+        observations: msg.data.observations,
+        predictions: {
+          ...(model.predictions ?? {}),
+          day_median: msg.data.day_median,
+        },
+      };
     default:
       return model;
   }
@@ -494,12 +512,7 @@ function initMainView(model, dispatch) {
           [{ event: "submit", fct: (event) => event.preventDefault() }],
         ),
         create("div", { id: "calibration-main__plots" }, [
-          create("div", { id: "calibration-main__legend" }, [
-            create("div", {}, [
-              create("span", {}, ["Observations"]),
-              create("span", { class: "blue" }),
-            ]),
-          ]),
+          create("div", { id: "calibration-main__legend" }, []),
           create("svg", { id: "calibration-main__discharge", class: "plot" }),
           create("svg", { id: "calibration-main__rmse", class: "plot" }),
           create("svg", { id: "calibration-main__nse", class: "plot" }),
@@ -508,6 +521,13 @@ function initMainView(model, dispatch) {
       ],
     ),
   );
+
+  let resizeTimeout;
+  const resizeObserver = new ResizeObserver(() => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => dispatch({ type: "Noop" }), 100);
+  });
+  resizeObserver.observe(document.getElementById("data-main__plots"));
 }
 
 function metaView(model) {
@@ -694,12 +714,35 @@ function calibrationView(model, dispatch) {
 
   legendView(model, dispatch);
   dischargeView(model);
-  rmseView(model);
-  nseView(model);
-  kseView(model);
+  metricView(model, "rmse");
+  metricView(model, "nse");
+  metricView(model, "kge");
 }
 
-function legendView(model, dispatch) {}
+function legendView(model, dispatch) {
+  const legend = document.getElementById("calibration-main__legend");
+  clear(legend);
+
+  if (model.observations !== null) {
+    legend.appendChild(
+      create("div", {}, [
+        create("span", {}, ["observations"]),
+        create("span", { class: model.colours[0] }),
+      ]),
+    );
+  }
+
+  if (model.predictions !== null) {
+    Object.entries(model.predictions).forEach(([m, _], i) => {
+      legend.appendChild(
+        create("div", {}, [
+          create("span", {}, [m.replace("_", " ")]),
+          create("span", { class: model.colours[i + 1] }),
+        ]),
+      );
+    });
+  }
+}
 
 function dischargeView(model) {
   const _svg = document.getElementById("calibration-main__discharge");
@@ -771,10 +814,10 @@ function dischargeView(model) {
       .attr("font-size", "0.9rem")
       .text("Débit");
 
-    // current data
+    // observations
     svg
       .append("path")
-      .attr("class", "blue")
+      .attr("class", model.colours[0])
       .datum(observations)
       .attr(
         "d",
@@ -783,11 +826,122 @@ function dischargeView(model) {
           .x((d) => xScale(new Date(d.date)))
           .y((d) => yScale(d.discharge)),
       );
+
+    // predictions
+    if (model.predictions !== null) {
+      Object.entries(model.predictions).forEach(([m, { predictions }], i) => {
+        svg
+          .append("path")
+          .attr("class", model.colours[i + 1])
+          .datum(predictions)
+          .attr(
+            "d",
+            d3
+              .line()
+              .x((d) => xScale(new Date(d.date)))
+              .y((d) => yScale(d.discharge)),
+          );
+      });
+    }
   }
 }
 
-function rmseView(model) {}
+function metricView(model, metric) {
+  const _svg = document.getElementById(`calibration-main__${metric}`);
+  clear(_svg);
+  if (model.predictions === null) {
+    _svg.setAttribute("hidden", true);
+  } else {
+    _svg.removeAttribute("hidden");
+    const width = _svg.clientWidth;
+    const height = _svg.clientHeight;
+    _svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
-function nseView(model) {}
+    const boundaries = {
+      l: 25,
+      r: width - 5,
+      t: 15,
+      b: height - 50,
+    };
 
-function kseView(model) {}
+    const svg = d3.select(_svg);
+
+    const data = Object.entries(model.predictions).map(
+      ([m, { results }], i) => ({
+        model: m,
+        value: results[metric],
+        colour: model.colours[i + 1],
+      }),
+    );
+
+    const xScale = d3
+      .scaleBand()
+      .domain(d3.extent(data, (d) => d.model))
+      .range([boundaries.l, boundaries.r])
+      .padding(0.1);
+    const yScale = d3
+      .scaleLinear()
+      .domain([
+        Math.min(
+          0,
+          d3.min(data, (d) => d.value),
+        ),
+        Math.max(
+          1,
+          d3.max(data, (d) => d.value),
+        ),
+      ])
+      .range([boundaries.b, boundaries.t]);
+
+    // x axis
+    const xAxis = svg
+      .append("g")
+      .attr("class", "x-axis")
+      .attr("transform", `translate(0, ${boundaries.b})`)
+      .call(d3.axisBottom(xScale));
+    xAxis.selectAll("text").remove();
+    // y axis
+    const yAxis = svg
+      .append("g")
+      .attr("class", "y-axis")
+      .attr("transform", `translate(${boundaries.l}, 0)`)
+      .call(d3.axisLeft(yScale).ticks(0));
+    yAxis.selectAll("text").remove();
+    svg
+      .append("text")
+      .attr("x", 10)
+      .attr("y", (boundaries.t + boundaries.b) / 2)
+      .attr("text-anchor", "middle")
+      .attr("dominant-baseline", "middle")
+      .attr(
+        "transform",
+        `rotate(-90, 10, ${(boundaries.t + boundaries.b) / 2})`,
+      )
+      .attr("font-size", "0.9rem")
+      .text(metric);
+
+    // bands
+    svg
+      .selectAll("rect")
+      .data(data)
+      .join("rect")
+      .attr("class", (d) => d.colour)
+      .attr("x", (d) => xScale(d.model))
+      .attr("y", (d) => yScale(d.value))
+      .attr("width", xScale.bandwidth())
+      .attr("height", (d) => yScale(0) - yScale(d.value));
+    // values
+    svg
+      .append("g")
+      .selectAll("text")
+      .attr("class", "text-values")
+      .data(data)
+      .join("text")
+      .attr("x", (d) => xScale(d.model) + xScale.bandwidth() / 2)
+      .attr("y", (d) => yScale(d.value))
+      .attr("dy", -5)
+      .attr("text-anchor", "middle")
+      .attr("font-size", "0.9rem")
+      .text((d) => round(d.value, 2));
+  }
+}

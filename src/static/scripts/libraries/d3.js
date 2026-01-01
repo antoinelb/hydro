@@ -25,6 +25,7 @@ export const {
   scaleLinear,
   scaleOrdinal,
   scaleTime,
+  scaleBand,
   schemeCategory10,
   select,
   selectAll,
