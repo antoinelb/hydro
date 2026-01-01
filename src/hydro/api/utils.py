@@ -2,6 +2,7 @@ import json
 from datetime import date, datetime, timezone
 from typing import Any, Awaitable, Callable
 
+import numpy as np
 import polars as pl
 from starlette.requests import Request
 from starlette.responses import JSONResponse as _JSONResponse
@@ -239,5 +240,10 @@ def convert_for_json(data: Any) -> Any:
                 pl.col(pl.Datetime).dt.strftime("%Y-%m-%d %H:%M:%S"),
             ).to_dicts()
         ]
+    elif isinstance(data, float):
+        if np.isnan(data):
+            return None
+        else:
+            return data
     else:
         return data

@@ -58,6 +58,8 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
             await _handle_precipitation_data_message(ws, msg.get("data", {}))
         case "datasets":
             await _handle_datasets_message(ws, msg.get("data", {}))
+        case _:
+            await _send(ws, "error", f"Unknown message type {msg['type']}.")
 
 
 async def _handle_models_message(ws: WebSocket) -> None:

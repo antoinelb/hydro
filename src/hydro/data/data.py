@@ -13,7 +13,6 @@ from . import hydro, precipitation, weather
 
 PetModels = Literal["oudin"]
 SnowModels = Literal["cemaneige"]
-ClimateModels = Literal["gr4j", "bucket"]
 
 ##########
 # public #

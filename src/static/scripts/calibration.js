@@ -31,6 +31,7 @@ export function initModel() {
     algorithm: window.localStorage.getItem("algorithm") || null,
     algorithmParams: null,
     observations: null,
+    predictions: null,
   };
 }
 
@@ -175,35 +176,73 @@ export async function update(
       }
     case "StartCalibration":
       if (model.ws?.readyState === WebSocket.OPEN && configValid) {
-        model.ws.send(
-          JSON.stringify({
-            type: "calibration_start",
-            data: {
-              station: station,
-              pet_model: petModel,
-              n_valid_years: nValidYears,
-              models: model.models,
-              snow_model: model.snowModel,
-              objective: model.objective,
-              transformation: model.transformation,
-              algorithm: model.algorithm,
-              algorithm_params: model.algorithmParams,
-            },
-          }),
-        );
+        model.models.forEach((m) => {
+          model.ws.send(
+            JSON.stringify({
+              type: "calibration_start",
+              data: {
+                station: station,
+                pet_model: petModel,
+                n_valid_years: nValidYears,
+                climate_model: m,
+                snow_model: model.snowModel,
+                objective: model.objective,
+                transformation: model.transformation,
+                algorithm: model.algorithm,
+                algorithm_params: model.algorithmParams,
+              },
+            }),
+          );
+        });
       } else {
         setTimeout(() => dispatch(msg), 1000);
       }
       return { ...model, loading: true, running: true };
     case "StopCalibration":
       if (model.ws?.readyState === WebSocket.OPEN) {
-        model.ws.send(
-          JSON.stringify({
-            type: "calibration_stop",
-          }),
-        );
+        if (msg.data) {
+          model.ws.send(
+            JSON.stringify({
+              type: "calibration_stop",
+              data: msg.data,
+            }),
+          );
+        } else {
+          model.models.forEach((m) => {
+            model.ws.send(
+              JSON.stringify({
+                type: "calibration_stop",
+                data: m,
+              }),
+            );
+          });
+        }
       }
+
       return { ...model, loading: false, running: false };
+    case "GotCalibrationStep":
+      if (model.running) {
+        const modelPredictions =
+          model.predictions === null
+            ? []
+            : (model.predictions[msg.data.model] ?? []);
+        modelPredictions.push({
+          predictions: msg.data.predictions,
+          results: msg.data.results,
+        });
+        if (msg.data.done) {
+          dispatch({ type: "StopCalibration", data: msg.data.model });
+        }
+        return {
+          ...model,
+          predictions: {
+            ...(model.predictions ?? {}),
+            [msg.data.model]: modelPredictions,
+          },
+        };
+      } else {
+        return model;
+      }
     case "GetObservations":
       if (model.ws?.readyState === WebSocket.OPEN && configValid) {
         model.ws.send(
@@ -242,6 +281,9 @@ function handleMessage(event, dispatch, createNotification) {
       break;
     case "observations":
       dispatch({ type: "GotObservations", data: msg.data });
+      break;
+    case "calibration_step":
+      dispatch({ type: "GotCalibrationStep", data: msg.data });
       break;
     default:
       createNotification("Unknown websocket message", true);
