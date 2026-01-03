@@ -276,7 +276,7 @@ export async function update(
         observations: msg.data.observations,
         predictions: {
           ...(model.predictions ?? {}),
-          day_median: msg.data.day_median,
+          day_median: [msg.data.day_median],
         },
       };
     default:
@@ -829,7 +829,8 @@ function dischargeView(model) {
 
     // predictions
     if (model.predictions !== null) {
-      Object.entries(model.predictions).forEach(([m, { predictions }], i) => {
+      Object.entries(model.predictions).forEach(([m, results], i) => {
+        const predictions = results[results.length - 1].predictions;
         svg
           .append("path")
           .attr("class", model.colours[i + 1])
@@ -866,13 +867,11 @@ function metricView(model, metric) {
 
     const svg = d3.select(_svg);
 
-    const data = Object.entries(model.predictions).map(
-      ([m, { results }], i) => ({
-        model: m,
-        value: results[metric],
-        colour: model.colours[i + 1],
-      }),
-    );
+    const data = Object.entries(model.predictions).map(([m, results], i) => ({
+      model: m,
+      value: results[results.length - 1].results[metric],
+      colour: model.colours[i + 1],
+    }));
 
     const xScale = d3
       .scaleBand()
@@ -882,14 +881,8 @@ function metricView(model, metric) {
     const yScale = d3
       .scaleLinear()
       .domain([
-        Math.min(
-          0,
-          d3.min(data, (d) => d.value),
-        ),
-        Math.max(
-          1,
-          d3.max(data, (d) => d.value),
-        ),
+        Math.min(0, Math.floor(d3.min(data, (d) => d.value))),
+        Math.max(1, Math.ceil(d3.max(data, (d) => d.value))),
       ])
       .range([boundaries.b, boundaries.t]);
 
@@ -929,7 +922,7 @@ function metricView(model, metric) {
       .attr("x", (d) => xScale(d.model))
       .attr("y", (d) => yScale(d.value))
       .attr("width", xScale.bandwidth())
-      .attr("height", (d) => yScale(0) - yScale(d.value));
+      .attr("height", (d) => yScale(yScale.domain()[0]) - yScale(d.value));
     // values
     svg
       .append("g")

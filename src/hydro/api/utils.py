@@ -240,6 +240,8 @@ def convert_for_json(data: Any) -> Any:
                 pl.col(pl.Datetime).dt.strftime("%Y-%m-%d %H:%M:%S"),
             ).to_dicts()
         ]
+    elif isinstance(data, np.ndarray):
+        return data.tolist()
     elif isinstance(data, float):
         if np.isnan(data):
             return None

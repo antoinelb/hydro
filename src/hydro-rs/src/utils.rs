@@ -1,62 +1,101 @@
+use ndarray::ArrayView1;
 use numpy::PyReadonlyArray1;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
+use thiserror::Error;
 
-pub fn calculate_rmse(observations: &[f64], predictions: &[f64]) -> f64 {
-    if observations.len() != predictions.len() {
-        f64::NAN
-    } else {
-        let sum: f64 = observations
-            .iter()
-            .zip(predictions)
-            .map(|(o, p)| (o - p).powi(2))
-            .sum();
-        (sum / observations.len() as f64).sqrt()
+#[derive(Error, Debug)]
+pub enum MetricsError {
+    #[error("observations and simulations must have the same length (got {0} and {1})")]
+    LengthMismatch(usize, usize),
+}
+
+impl From<MetricsError> for PyErr {
+    fn from(err: MetricsError) -> PyErr {
+        PyValueError::new_err(err.to_string())
     }
 }
 
-pub fn calculate_nse(observations: &[f64], predictions: &[f64]) -> f64 {
-    if observations.len() != predictions.len() {
-        f64::NAN
+fn check_lengths(
+    observations: ArrayView1<f64>,
+    simulations: ArrayView1<f64>,
+) -> Result<(), MetricsError> {
+    if observations.len() != simulations.len() {
+        Err(MetricsError::LengthMismatch(
+            observations.len(),
+            simulations.len(),
+        ))
     } else {
-        let mean: f64 = observations.iter().sum::<f64>() / observations.len() as f64;
-        let (numerator, denominator) = observations
-            .iter()
-            .zip(predictions)
-            .fold((0.0, 0.0), |(num, den), (&o, &p)| {
-                (num + (o - p).powi(2), den + (o - mean).powi(2))
-            });
-        1.0 - numerator / denominator
+        Ok(())
     }
 }
 
-pub fn calculate_kge(observations: &[f64], predictions: &[f64]) -> f64 {
-    if observations.len() != predictions.len() {
-        f64::NAN
-    } else {
-        let observations_mean = observations.iter().sum::<f64>() / observations.len() as f64;
-        let observations_mean_2 =
-            observations.iter().map(|x| x.powi(2)).sum::<f64>() / observations.len() as f64;
-        let predictions_mean = predictions.iter().sum::<f64>() / observations.len() as f64;
-        let predictions_mean_2 =
-            predictions.iter().map(|x| x.powi(2)).sum::<f64>() / observations.len() as f64;
-        let observations_predictions_mean = observations
-            .iter()
-            .zip(predictions)
-            .map(|(o, p)| o * p)
-            .sum::<f64>()
+pub fn calculate_rmse(
+    observations: ArrayView1<f64>,
+    simulations: ArrayView1<f64>,
+) -> Result<f64, MetricsError> {
+    check_lengths(observations, simulations)?;
+    let sum: f64 = observations
+        .iter()
+        .zip(simulations)
+        .map(|(o, p)| (o - p).powi(2))
+        .sum();
+    Ok((sum / observations.len() as f64).sqrt())
+}
+
+pub fn calculate_nse(
+    observations: ArrayView1<f64>,
+    simulations: ArrayView1<f64>,
+) -> Result<f64, MetricsError> {
+    check_lengths(observations, simulations)?;
+    let mean: f64 =
+        observations.iter().sum::<f64>() / observations.len() as f64;
+    let (numerator, denominator) = observations.iter().zip(simulations).fold(
+        (0.0, 0.0),
+        |(num, den), (&o, &p)| {
+            (num + (o - p).powi(2), den + (o - mean).powi(2))
+        },
+    );
+    Ok(1.0 - numerator / denominator)
+}
+
+pub fn calculate_kge(
+    observations: ArrayView1<f64>,
+    simulations: ArrayView1<f64>,
+) -> Result<f64, MetricsError> {
+    check_lengths(observations, simulations)?;
+    let observations_mean =
+        observations.iter().sum::<f64>() / observations.len() as f64;
+    let observations_mean_2 =
+        observations.iter().map(|x| x.powi(2)).sum::<f64>()
             / observations.len() as f64;
+    let simulations_mean =
+        simulations.iter().sum::<f64>() / observations.len() as f64;
+    let simulations_mean_2 =
+        simulations.iter().map(|x| x.powi(2)).sum::<f64>()
+            / observations.len() as f64;
+    let observations_simulations_mean = observations
+        .iter()
+        .zip(simulations)
+        .map(|(o, p)| o * p)
+        .sum::<f64>()
+        / observations.len() as f64;
 
-        let observations_std = (observations_mean_2 - observations_mean.powi(2)).sqrt();
-        let predictions_std = (predictions_mean_2 - predictions_mean.powi(2)).sqrt();
-        let covariance = observations_predictions_mean - observations_mean * predictions_mean;
+    let observations_std =
+        (observations_mean_2 - observations_mean.powi(2)).sqrt();
+    let simulations_std =
+        (simulations_mean_2 - simulations_mean.powi(2)).sqrt();
+    let covariance =
+        observations_simulations_mean - observations_mean * simulations_mean;
 
-        let r: f64 = covariance / (observations_std * predictions_std);
-        let alpha: f64 = predictions_std / observations_std;
-        let beta: f64 = predictions_mean / observations_mean;
+    let r: f64 = covariance / (observations_std * simulations_std);
+    let alpha: f64 = simulations_std / observations_std;
+    let beta: f64 = simulations_mean / observations_mean;
 
-        1. - ((r - 1.).powi(2) + (alpha - 1.).powi(2) + (beta - 1.).powi(2)).sqrt()
-    }
+    Ok(1.
+        - ((r - 1.).powi(2) + (alpha - 1.).powi(2) + (beta - 1.).powi(2))
+            .sqrt())
 }
 
 #[gen_stub_pyfunction(module = "hydro_rs.utils")]
@@ -64,12 +103,12 @@ pub fn calculate_kge(observations: &[f64], predictions: &[f64]) -> f64 {
 #[pyo3(name = "calculate_rmse")]
 pub fn py_calculate_rmse<'py>(
     observations: PyReadonlyArray1<'py, f64>,
-    predictions: PyReadonlyArray1<'py, f64>,
-) -> f64 {
-    calculate_rmse(
-        observations.as_slice().unwrap(),
-        predictions.as_slice().unwrap(),
-    )
+    simulations: PyReadonlyArray1<'py, f64>,
+) -> PyResult<f64> {
+    Ok(calculate_rmse(
+        observations.as_array(),
+        simulations.as_array(),
+    )?)
 }
 
 #[gen_stub_pyfunction(module = "hydro_rs.utils")]
@@ -77,12 +116,12 @@ pub fn py_calculate_rmse<'py>(
 #[pyo3(name = "calculate_nse")]
 pub fn py_calculate_nse<'py>(
     observations: PyReadonlyArray1<'py, f64>,
-    predictions: PyReadonlyArray1<'py, f64>,
-) -> f64 {
-    calculate_nse(
-        observations.as_slice().unwrap(),
-        predictions.as_slice().unwrap(),
-    )
+    simulations: PyReadonlyArray1<'py, f64>,
+) -> PyResult<f64> {
+    Ok(calculate_nse(
+        observations.as_array(),
+        simulations.as_array(),
+    )?)
 }
 
 #[gen_stub_pyfunction(module = "hydro_rs.utils")]
@@ -90,12 +129,12 @@ pub fn py_calculate_nse<'py>(
 #[pyo3(name = "calculate_kge")]
 pub fn py_calculate_kge<'py>(
     observations: PyReadonlyArray1<'py, f64>,
-    predictions: PyReadonlyArray1<'py, f64>,
-) -> f64 {
-    calculate_kge(
-        observations.as_slice().unwrap(),
-        predictions.as_slice().unwrap(),
-    )
+    simulations: PyReadonlyArray1<'py, f64>,
+) -> PyResult<f64> {
+    Ok(calculate_kge(
+        observations.as_array(),
+        simulations.as_array(),
+    )?)
 }
 
 pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {

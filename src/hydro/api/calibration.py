@@ -146,12 +146,20 @@ async def _handle_calibration_start_message(
 ) -> None:
     if any(
         key not in msg_data
-        for key in ("station", "pet_model", "n_valid_years", "climate_model")
+        for key in (
+            "station",
+            "pet_model",
+            "n_valid_years",
+            "climate_model",
+            "algorithm",
+            "objective",
+            "algorithm_params",
+        )
     ):
         await _send(
             ws,
             "error",
-            "`station`, `pet_model`, `n_valid_years` and `climate_model` must be provided.",
+            "`station`, `pet_model`, `n_valid_years`, `climate_model`, `algorithm`, `objective` and `algorithm_params` must be provided.",
         )
         return
 
@@ -179,7 +187,13 @@ async def _handle_calibration_start_message(
         )
 
     model = await model.calibrate(
-        calib_data, metadata, callback=callback, stop_event=stop_event
+        calib_data,
+        metadata,
+        algorithm=msg_data["algorithm"],
+        objective=msg_data["objective"],
+        algorithm_params=msg_data["algorithm_params"],
+        callback=callback,
+        stop_event=stop_event,
     )
 
 

@@ -1,5 +1,4 @@
 import asyncio
-import time
 from typing import Awaitable, Callable, Literal, Self, assert_never
 
 import hydro_rs
@@ -7,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 import polars as pl
 
+from .calibration import Algorithms, ObjectiveFunctions, calibrate
 from .hydro import Metadata
 
 #########
@@ -21,20 +21,42 @@ ClimateModels = Literal["day_median", "gr4j", "bucket"]
 
 
 class ClimateModel:
+    """Base class for climate/hydrological models."""
+
+    @property
+    def name(self) -> str:
+        """Model name used for Rust dispatch."""
+        raise NotImplementedError()
+
+    @property
+    def param_names(self) -> list[str]:
+        """Ordered list of parameter names."""
+        raise NotImplementedError()
+
+    @property
+    def param_bounds(self) -> list[tuple[float, float]]:
+        """Parameter bounds as list of (min, max) tuples."""
+        raise NotImplementedError()
+
     async def calibrate(
         self,
         data: pl.DataFrame,
         metadata: Metadata,
         *,
+        algorithm: Algorithms = "sce",
+        objective: ObjectiveFunctions = "kge",
+        algorithm_params: dict = {},
         callback: (
             Callable[[bool, pl.DataFrame, dict[str, float]], Awaitable[None]]
             | None
         ) = None,
         stop_event: asyncio.Event | None = None,
     ) -> Self:
+        """Calibrate the model against observed discharge data."""
         raise NotImplementedError()
 
     def __call__(self, data: pl.DataFrame) -> npt.NDArray[np.float64]:
+        """Run the model with current parameters."""
         raise NotImplementedError()
 
 
@@ -47,6 +69,7 @@ class DayMedianClimateModel(ClimateModel):
         data: pl.DataFrame,
         metadata: Metadata,
         *,
+        calibration_params: None = None,
         callback: None = None,
         stop_event: None = None,
     ) -> Self:
@@ -98,30 +121,61 @@ class DayMedianClimateModel(ClimateModel):
 
 class Gr4jClimateModel(ClimateModel):
     def __init__(self) -> None:
-        self._median = None
+        self._params = {
+            param: (min_ + max_) / 2
+            for param, (min_, max_) in self.possible_params.items()
+        }
 
     async def calibrate(
         self,
         data: pl.DataFrame,
         metadata: Metadata,
         *,
+        algorithm: Algorithms = "sce",
+        objective: ObjectiveFunctions = "kge",
+        algorithm_params: dict,
         callback: (
-            Callable[[bool, pl.DataFrame, dict[str, float]], Awaitable[None]]
+            Callable[
+                [bool, pl.DataFrame, dict[str, float]],
+                Awaitable[None],
+            ]
             | None
         ) = None,
         stop_event: asyncio.Event | None = None,
     ) -> Self:
-        self._median = data["discharge"].median()
-        for iter in range(10):
-            if stop_event is not None and stop_event.is_set():
-                break
-            await asyncio.sleep(1)
-            if callback is not None:
-                await _evaluate_calibration_step(self, data, callback)
+        params = await calibrate(
+            "gr4j",
+            list(self.possible_params.values()),
+            data,
+            algorithm,
+            objective,
+            algorithm_params,
+            callback=callback,
+            stop_event=stop_event,
+        )
+        self._params = {
+            param: value
+            for param, value in zip(
+                self.possible_params.keys(), params, strict=True
+            )
+        }
         return self
 
     def __call__(self, data: pl.DataFrame) -> npt.NDArray[np.float64]:
-        return np.repeat(self._median, data.shape[0])
+        precipitation = data["precipitation"].to_numpy()
+        pet = data["pet"].to_numpy()
+        return hydro_rs.climate.gr4j.simulate(
+            np.array(self._params.values()), precipitation, pet
+        )
+
+    @property
+    def possible_params(self) -> dict[str, tuple[float, float]]:
+        return {
+            "x1": (10, 1500),
+            "x2": (-5, 3),
+            "x3": (10, 400),
+            "x4": (0.8, 10.0),
+        }
 
 
 def get_model(model: ClimateModels) -> ClimateModel:
@@ -147,23 +201,3 @@ def evaluate_model(
     nse = hydro_rs.utils.calculate_nse(observations, predictions)
     kge = hydro_rs.utils.calculate_kge(observations, predictions)
     return {"rmse": rmse, "nse": nse, "kge": kge}
-
-
-###########
-# private #
-###########
-
-
-async def _evaluate_calibration_step(
-    model: ClimateModel,
-    data: pl.DataFrame,
-    callback: Callable[
-        [bool, pl.DataFrame, dict[str, float]], Awaitable[None]
-    ],
-) -> None:
-    _predictions = model(data)
-    predictions = data.select("date").with_columns(
-        pl.Series("discharge", _predictions)
-    )
-    results = evaluate_model(data["discharge"].to_numpy(), _predictions)
-    await callback(done=False, predictions=predictions, results=results)

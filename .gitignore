@@ -15,6 +15,7 @@ wheels/
 target/
 
 /data
+holmes
 
 # Claude
 CLAUDE.md
