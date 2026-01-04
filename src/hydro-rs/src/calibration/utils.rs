@@ -1,28 +1,17 @@
+use ndarray::Array1;
+use rand_chacha::ChaCha8Rng;
 use std::str::FromStr;
 
-use pyo3::exceptions::PyValueError;
-use pyo3::prelude::*;
-use thiserror::Error;
+use crate::model::SimulateFn;
 
-use crate::climate::ClimateError;
-use crate::utils::MetricsError;
-
-#[derive(Error, Debug)]
-pub enum CalibrationError {
-    #[error("{0}")]
-    Climate(#[from] ClimateError),
-    #[error("{0}")]
-    Metrics(#[from] MetricsError),
-    #[error("{0}")]
-    InvalidModel(String),
-    #[error("{0}")]
-    InvalidObjective(String),
-}
-
-impl From<CalibrationError> for PyErr {
-    fn from(err: CalibrationError) -> PyErr {
-        PyValueError::new_err(err.to_string())
-    }
+pub struct CalibrationParams {
+    pub params: Array1<f64>,
+    pub simulate: SimulateFn,
+    pub lower_bounds: Array1<f64>,
+    pub upper_bounds: Array1<f64>,
+    pub objective: Objective,
+    pub rng: ChaCha8Rng,
+    pub done: bool,
 }
 
 #[derive(Debug, Clone, Copy)]

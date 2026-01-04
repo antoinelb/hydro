@@ -1,18 +1,22 @@
 import asyncio
-from typing import Awaitable, Callable, Literal, assert_never
+from typing import Any, Awaitable, Callable, Literal, assert_never
 
 import numpy as np
 import numpy.typing as npt
 import polars as pl
-from hydro_rs.calibration.sce import SCE
+from hydro_rs.calibration.sce import Sce
+
+from .climate import day_median
+from .hydro import Metadata
+from .utils import Data
 
 #########
 # types #
 #########
 
-ObjectiveFunctions = Literal["rmse", "nse", "kge"]
-Transformations = Literal["log", "sqrt", "none"]
-Algorithms = Literal["sce"]
+Objective = Literal["rmse", "nse", "kge"]
+Transformation = Literal["log", "sqrt", "none"]
+Algorithm = Literal["sce"]
 
 ##########
 # public #
@@ -20,7 +24,7 @@ Algorithms = Literal["sce"]
 
 
 def get_algorithm_params(
-    algorithm: Algorithms,
+    algorithm: Algorithm,
 ) -> dict[str, dict[str, int | float | None]]:
     match algorithm:
         case "sce":
@@ -57,61 +61,73 @@ def get_algorithm_params(
                 },
             }
         case _:
-            assert_never(algorithm)
+            assert_never(algorithm)  # type: ignore
 
 
 async def calibrate(
-    model: str,
-    param_bounds: list[tuple[float, float]],
     data: pl.DataFrame,
-    algorithm: Algorithms,
-    objective: ObjectiveFunctions,
-    algorithm_params: dict,
+    metadata: Metadata,
+    climate_model: str,
+    snow_model: str | None,
+    objective: Objective,
+    algorithm: Algorithm,
+    params: dict[str, Any],
     *,
     callback: (
         Callable[[bool, pl.DataFrame, dict[str, float]], Awaitable[None]]
         | None
-    ),
+    ) = None,
     stop_event: asyncio.Event | None = None,
 ) -> npt.NDArray[np.float64]:
-    precipitation = data["precipitation"].to_numpy()
-    pet = data["pet"].to_numpy()
-    observations = data["discharge"].to_numpy()
-    seed = 123
-    max_iter = 100_000
+    if climate_model == "day_median":
+        return day_median.calibrate(data)
+    else:
+        seed = 123
+        max_iter = 100_000
+        _data = Data(
+            data["precipitation"].to_numpy(),
+            data["temperature"].to_numpy(),
+            data["pet"].to_numpy(),
+            data["date"].dt.ordinal_day().to_numpy().astype(np.uintp),
+        )
+        observations = data["discharge"].to_numpy()
 
-    match algorithm:
-        case "sce":
-            calibration = SCE(
-                model,
-                param_bounds,
-                objective,
-                seed=seed,
-                **{
-                    param: algorithm_params[param]
-                    for param in get_algorithm_params("sce").keys()
-                },
-            )
-            calibration.init(precipitation, pet, observations)
-            for _ in range(max_iter):
-                calibration.step(precipitation, pet, observations)
-                simulation = data.select("date").with_columns(
-                    pl.Series("discharge", calibration.last_simulation)
+        match algorithm:
+            case "sce":
+                calibration = Sce(
+                    climate_model,
+                    snow_model,
+                    objective,
+                    seed=seed,
+                    n_complexes=params["n_complexes"],
+                    k_stop=params["k_stop"],
+                    p_convergence_threshold=params["p_convergence_threshold"],
+                    geometric_range_threshold=params[
+                        "geometric_range_threshold"
+                    ],
+                    max_evaluations=params["max_evaluations"],
                 )
-                results_ = calibration.last_objectives
-                results = {
-                    "rmse": results_[0],
-                    "nse": results_[1],
-                    "kge": results_[2],
-                }
-                if callback is not None:
-                    await callback(calibration.done, simulation, results)
-                if stop_event is not None and stop_event.is_set():
-                    break
-                if calibration.done:
-                    break
+                calibration.init(_data, metadata, observations)
+                for _ in range(max_iter):
+                    done, params, _simulation, objectives = calibration.step(
+                        _data, metadata, observations
+                    )
+                    simulation = data.select("date").with_columns(
+                        pl.Series("discharge", _simulation)
+                    )
+                    results = {
+                        "rmse": objectives[0],
+                        "nse": objectives[1],
+                        "kge": objectives[2],
+                    }
+                    if callback is not None:
+                        await callback(done, simulation, results)
+                    if stop_event is not None and stop_event.is_set():
+                        break
+                    if done:
+                        break
 
-            return np.array(calibration.best_params)
+                return np.array(params)
 
-        case _:
-            assert_never(algorithm)
+            case _:
+                assert_never(algorithm)  # type: ignore

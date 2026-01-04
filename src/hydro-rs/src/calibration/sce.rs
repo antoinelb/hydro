@@ -1,4 +1,5 @@
 #![allow(clippy::too_many_arguments)]
+
 use std::str::FromStr;
 
 use ndarray::{s, Array1, Array2, ArrayView1, ArrayView2, Axis};
@@ -6,44 +7,45 @@ use ndarray_rand::rand_distr::Uniform;
 use ndarray_rand::RandomExt;
 use numpy::{PyArray1, PyReadonlyArray1, ToPyArray};
 use pyo3::prelude::*;
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::calibration::utils::{CalibrationError, Objective};
-use crate::climate::{get_model, SimulateFn};
-use crate::utils::{calculate_kge, calculate_nse, calculate_rmse};
+use crate::calibration::utils::{CalibrationParams, Objective};
+use crate::climate;
+use crate::metrics::{calculate_kge, calculate_nse, calculate_rmse};
+use crate::model::{
+    compose_init, compose_simulate, Data, Error, Metadata, PyData, PyMetadata,
+    SimulateFn,
+};
+use crate::snow;
 
-#[gen_stub_pyclass]
-#[pyclass]
-#[allow(clippy::upper_case_acronyms)]
-pub struct SCE {
-    model: String,
-    lower_bounds: Array1<f64>,
-    upper_bounds: Array1<f64>,
-    objective: Objective,
-    rng: ChaCha8Rng,
-    population: Array2<f64>,
-    objectives: Array2<f64>,
-    criteria: Array1<f64>,
-    best_params: Array1<f64>,
-    best_simulation: Array1<f64>,
-    n_calls: usize,
-    done: bool,
-    n_complexes: usize,
-    n_per_complex: usize,
-    n_simplex: usize,
-    n_evolution_steps: usize,
-    k_stop: usize,
-    p_convergence_threshold: f64,
-    geometric_range_threshold: f64,
-    max_evaluations: usize,
+struct SceParams {
+    pub population: Array2<f64>,
+    pub objectives: Array2<f64>,
+    pub criteria: Array1<f64>,
+    pub best_simulation: Array1<f64>,
+    pub n_calls: usize,
+    pub n_complexes: usize,
+    pub n_per_complex: usize,
+    pub n_simplex: usize,
+    pub n_evolution_steps: usize,
+    pub k_stop: usize,
+    pub p_convergence_threshold: f64,
+    pub geometric_range_threshold: f64,
+    pub max_evaluations: usize,
 }
 
-impl SCE {
+#[pyclass(module = "hydro_rs.calibration.sce", unsendable)]
+pub struct Sce {
+    calibration_params: CalibrationParams,
+    sce_params: SceParams,
+}
+
+impl Sce {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        model: &str,
-        param_bounds: Vec<(f64, f64)>,
+        climate_model: &str,
+        snow_model: Option<&str>,
         objective: Objective,
         n_complexes: usize,
         k_stop: usize,
@@ -51,17 +53,34 @@ impl SCE {
         geometric_range_threshold: f64,
         max_evaluations: usize,
         seed: u64,
-    ) -> Result<Self, CalibrationError> {
-        let n_params = param_bounds.len();
+    ) -> Result<Self, Error> {
+        let (simulate, params, bounds) = if let Some(snow_model) = snow_model {
+            let (snow_init, snow_simulate) = snow::get_model(snow_model)?;
+            let (climate_init, climate_simulate) =
+                climate::get_model(climate_model)?;
+
+            let init = compose_init(snow_init, climate_init);
+            let (defaults, bounds, n_snow_params) = init();
+            let simulate = compose_simulate(
+                snow_simulate,
+                climate_simulate,
+                n_snow_params,
+            );
+            (Box::new(simulate) as SimulateFn, defaults, bounds)
+        } else {
+            let (init, simulate) = climate::get_model(climate_model)?;
+            let (defaults, bounds) = init();
+            (Box::new(simulate) as SimulateFn, defaults, bounds)
+        };
+
+        let n_params = params.len();
         let n_per_complex = 2 * n_params + 1;
         let n_simplex = n_params + 1;
         let population_size = n_complexes * n_per_complex;
         let n_evolution_steps = 2 * n_params + 1;
 
-        let lower_bounds: Array1<f64> =
-            Array1::from_iter(param_bounds.iter().map(|(min, _)| *min));
-        let upper_bounds: Array1<f64> =
-            Array1::from_iter(param_bounds.iter().map(|(_, max)| *max));
+        let lower_bounds: Array1<f64> = bounds.column(0).to_owned();
+        let upper_bounds: Array1<f64> = bounds.column(1).to_owned();
 
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
 
@@ -80,23 +99,25 @@ impl SCE {
                 }
             });
 
-        let criteria: Array1<f64> = Array1::default(0);
-        let best_params = population.row(0).to_owned();
-        let best_simulation: Array1<f64> = Array1::default(0);
+        let criteria: Array1<f64> = Array1::from_vec(vec![]);
+        let params = population.row(0).to_owned();
 
-        Ok(SCE {
-            model: model.to_string(),
+        let calibration_params = CalibrationParams {
+            params,
+            simulate,
             lower_bounds,
             upper_bounds,
             objective,
             rng,
+            done: false,
+        };
+        let best_simulation: Array1<f64> = Array1::default(0);
+        let sce_params = SceParams {
             population,
             objectives,
             criteria,
-            best_params,
             best_simulation,
             n_calls: 0,
-            done: false,
             n_complexes,
             n_per_complex,
             n_simplex,
@@ -105,92 +126,103 @@ impl SCE {
             p_convergence_threshold,
             geometric_range_threshold,
             max_evaluations,
+        };
+
+        Ok(Sce {
+            calibration_params,
+            sce_params,
         })
     }
 
     pub fn init(
         &mut self,
-        precipitation: ArrayView1<f64>,
-        pet: ArrayView1<f64>,
+        data: &Data,
+        metadata: &Metadata,
         observations: ArrayView1<f64>,
-    ) -> Result<(), CalibrationError> {
-        let model_fn =
-            get_model(&self.model).map_err(CalibrationError::InvalidModel)?;
-        let objective_idx = match self.objective {
+    ) -> Result<(), Error> {
+        let objective_idx = match self.calibration_params.objective {
             Objective::Rmse => 0,
             Objective::Nse => 1,
             Objective::Kge => 2,
         };
 
         let population = generate_initial_population(
-            self.population.nrows(),
-            &self.lower_bounds,
-            &self.upper_bounds,
-            &mut self.rng,
+            self.sce_params.population.nrows(),
+            &self.calibration_params.lower_bounds,
+            &self.calibration_params.upper_bounds,
+            &mut self.calibration_params.rng,
         );
 
         let (population, objectives) = evaluate_initial_population(
-            model_fn,
-            precipitation,
-            pet,
+            &self.calibration_params.simulate,
+            data,
+            metadata,
             observations,
             population,
-            self.objective,
+            self.calibration_params.objective,
         )?;
 
-        self.criteria = Array1::from_vec(vec![objectives[[0, objective_idx]]]);
-        self.best_params = population.row(0).to_owned();
-        self.population = population;
-        self.objectives = objectives;
-        self.best_simulation =
-            model_fn(self.best_params.view(), precipitation, pet)?;
+        self.sce_params.criteria =
+            Array1::from_vec(vec![objectives[[0, objective_idx]]]);
+        self.calibration_params.params = population.row(0).to_owned();
+        self.sce_params.population = population;
+        self.sce_params.objectives = objectives;
+        self.sce_params.best_simulation = (self.calibration_params.simulate)(
+            &self.calibration_params.params,
+            data,
+            metadata,
+        )?;
 
         Ok(())
     }
 
     pub fn step(
         &mut self,
-        precipitation: ArrayView1<f64>,
-        pet: ArrayView1<f64>,
+        data: &Data,
+        metadata: &Metadata,
         observations: ArrayView1<f64>,
-    ) -> Result<(), CalibrationError> {
-        if self.done {
-            return Ok(());
+    ) -> Result<(bool, Array1<f64>, Array1<f64>, Array1<f64>), Error> {
+        if self.calibration_params.done {
+            return Ok((
+                true,
+                self.calibration_params.params.clone(),
+                self.sce_params.best_simulation.clone(),
+                self.sce_params.objectives.row(0).to_owned(),
+            ));
         }
 
-        let model_fn =
-            get_model(&self.model).map_err(CalibrationError::InvalidModel)?;
-        let (objective_idx, is_minimization) = match self.objective {
-            Objective::Rmse => (0, true),
-            Objective::Nse => (1, false),
-            Objective::Kge => (2, false),
-        };
+        let (objective_idx, is_minimization) =
+            match self.calibration_params.objective {
+                Objective::Rmse => (0, true),
+                Objective::Nse => (1, false),
+                Objective::Kge => (2, false),
+            };
 
         // partition into complexes
         let (complexes, complex_objectives) = partition_into_complexes(
-            std::mem::take(&mut self.population),
-            std::mem::take(&mut self.objectives),
-            self.n_complexes,
+            std::mem::take(&mut self.sce_params.population),
+            std::mem::take(&mut self.sce_params.objectives),
+            self.sce_params.n_complexes,
         );
 
         // Evolve each complex
         let (complexes, complex_objectives, n_calls) = evolve_complexes(
             complexes,
             complex_objectives,
-            self.lower_bounds.view(),
-            self.upper_bounds.view(),
-            model_fn,
-            precipitation,
-            pet,
+            self.calibration_params.lower_bounds.view(),
+            self.calibration_params.upper_bounds.view(),
+            &self.calibration_params.simulate,
+            data,
+            metadata,
             observations,
             objective_idx,
             is_minimization,
-            self.n_calls,
-            self.n_complexes,
-            self.n_per_complex,
-            self.n_simplex,
-            self.n_evolution_steps,
-            &mut self.rng,
+            self.sce_params.n_calls,
+            self.sce_params.n_complexes,
+            self.sce_params.n_per_complex,
+            self.sce_params.n_simplex,
+            self.sce_params.n_evolution_steps,
+            &mut self.calibration_params.rng,
         )?;
 
         let (population, objectives) = merge_complexes(
@@ -205,21 +237,28 @@ impl SCE {
         // Compute convergence metrics
         let gnrng = compute_normalized_geometric_range(
             population.view(),
-            self.lower_bounds.view(),
-            self.upper_bounds.view(),
+            self.calibration_params.lower_bounds.view(),
+            self.calibration_params.upper_bounds.view(),
         );
 
-        self.criteria
+        self.sce_params
+            .criteria
             .append(Axis(0), Array1::from_elem(1, best_objective).view())
             .unwrap();
 
-        let criteria_change = if self.criteria.len() >= self.k_stop {
-            let recent = self.criteria.slice(s![-(self.k_stop as isize)..]);
+        let criteria_change = if self.sce_params.criteria.len()
+            >= self.sce_params.k_stop
+        {
+            let recent = self
+                .sce_params
+                .criteria
+                .slice(s![-(self.sce_params.k_stop as isize)..]);
             let mean_recent = recent.iter().map(|x| x.abs()).sum::<f64>()
-                / self.k_stop as f64;
+                / self.sce_params.k_stop as f64;
             if mean_recent > 0.0 {
-                (self.criteria[self.criteria.len() - 1]
-                    - self.criteria[self.criteria.len() - self.k_stop])
+                (self.sce_params.criteria[self.sce_params.criteria.len() - 1]
+                    - self.sce_params.criteria[self.sce_params.criteria.len()
+                        - self.sce_params.k_stop])
                     .abs()
                     * 100.0
                     / mean_recent
@@ -230,17 +269,104 @@ impl SCE {
             f64::INFINITY
         };
 
-        self.done = n_calls > self.max_evaluations
-            || gnrng < self.geometric_range_threshold
-            || criteria_change < self.p_convergence_threshold;
-        self.best_params = population.row(0).to_owned();
-        self.n_calls = n_calls;
-        self.population = population;
-        self.objectives = objectives;
-        self.best_simulation =
-            model_fn(self.best_params.view(), precipitation, pet)?;
+        self.calibration_params.done = n_calls
+            > self.sce_params.max_evaluations
+            || gnrng < self.sce_params.geometric_range_threshold
+            || criteria_change < self.sce_params.p_convergence_threshold;
+        self.calibration_params.params = population.row(0).to_owned();
+        self.sce_params.n_calls = n_calls;
+        self.sce_params.population = population;
+        self.sce_params.objectives = objectives;
+        self.sce_params.best_simulation = (self.calibration_params.simulate)(
+            &self.calibration_params.params,
+            data,
+            metadata,
+        )?;
 
-        Ok(())
+        Ok((
+            self.calibration_params.done,
+            self.calibration_params.params.clone(),
+            self.sce_params.best_simulation.clone(),
+            self.sce_params.objectives.row(0).to_owned(),
+        ))
+    }
+}
+
+#[pymethods]
+impl Sce {
+    #[new]
+    pub fn py_new(
+        climate_model: &str,
+        snow_model: Option<&str>,
+        objective: &str,
+        n_complexes: usize,
+        k_stop: usize,
+        p_convergence_threshold: f64,
+        geometric_range_threshold: f64,
+        max_evaluations: usize,
+        seed: u64,
+    ) -> PyResult<Self> {
+        let objective = Objective::from_str(objective)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Sce::new(
+            climate_model,
+            snow_model,
+            objective,
+            n_complexes,
+            k_stop,
+            p_convergence_threshold,
+            geometric_range_threshold,
+            max_evaluations,
+            seed,
+        )
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    #[pyo3(name = "init")]
+    pub fn py_init(
+        &mut self,
+        data: PyData<'_>,
+        metadata: PyMetadata<'_>,
+        observations: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<()> {
+        self.init(
+            &data
+                .into_data()
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+            &metadata.into_metadata(),
+            observations.as_array(),
+        )
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+    }
+
+    #[pyo3(name = "step")]
+    pub fn py_step<'py>(
+        &mut self,
+        py: Python<'py>,
+        data: PyData<'_>,
+        metadata: PyMetadata<'_>,
+        observations: PyReadonlyArray1<'_, f64>,
+    ) -> PyResult<(
+        bool,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+        Bound<'py, PyArray1<f64>>,
+    )> {
+        let (done, best_params, simulation, objectives) = self
+            .step(
+                &data
+                    .into_data()
+                    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
+                &metadata.into_metadata(),
+                observations.as_array(),
+            )
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok((
+            done,
+            best_params.to_pyarray(py),
+            simulation.to_pyarray(py),
+            objectives.to_pyarray(py),
+        ))
     }
 }
 
@@ -274,19 +400,19 @@ fn generate_initial_population(
 }
 
 fn evaluate_initial_population(
-    model: SimulateFn,
-    precipitation: ArrayView1<f64>,
-    pet: ArrayView1<f64>,
+    simulate: &SimulateFn,
+    data: &Data,
+    metadata: &Metadata,
     observations: ArrayView1<f64>,
     population: Array2<f64>,
     objective: Objective,
-) -> Result<(Array2<f64>, Array2<f64>), CalibrationError> {
+) -> Result<(Array2<f64>, Array2<f64>), Error> {
     let n_population = population.nrows();
     let mut objectives = Array2::<f64>::zeros((n_population, 3));
 
     for i in 0..n_population {
-        let params = population.row(i);
-        let simulations = model(params, precipitation, pet)?;
+        let params = population.row(i).to_owned();
+        let simulations = simulate(&params, data, metadata)?;
         objectives
             .row_mut(i)
             .assign(&evaluate_simulation(observations, simulations.view())?);
@@ -311,7 +437,7 @@ fn evaluate_initial_population(
 fn evaluate_simulation(
     observations: ArrayView1<f64>,
     simulations: ArrayView1<f64>,
-) -> Result<Array1<f64>, CalibrationError> {
+) -> Result<Array1<f64>, Error> {
     Ok(Array1::from_vec(vec![
         calculate_rmse(observations, simulations)?,
         calculate_nse(observations, simulations)?,
@@ -329,11 +455,13 @@ fn sort_population(
 
     if is_minimization {
         indices.sort_by(|&a, &b| {
-            objectives[[a, objective_idx]].total_cmp(&objectives[[b, objective_idx]])
+            objectives[[a, objective_idx]]
+                .total_cmp(&objectives[[b, objective_idx]])
         });
     } else {
         indices.sort_by(|&a, &b| {
-            objectives[[b, objective_idx]].total_cmp(&objectives[[a, objective_idx]])
+            objectives[[b, objective_idx]]
+                .total_cmp(&objectives[[a, objective_idx]])
         });
     }
 
@@ -388,9 +516,9 @@ fn evolve_complexes(
     mut complex_objectives: Vec<Array2<f64>>,
     lower_bounds: ArrayView1<f64>,
     upper_bounds: ArrayView1<f64>,
-    model: SimulateFn,
-    precipitation: ArrayView1<f64>,
-    pet: ArrayView1<f64>,
+    simulate: &SimulateFn,
+    data: &Data,
+    metadata: &Metadata,
     observations: ArrayView1<f64>,
     objective_idx: usize,
     is_minimization: bool,
@@ -400,7 +528,7 @@ fn evolve_complexes(
     n_simplex: usize,
     n_evolution_steps: usize,
     rng: &mut ChaCha8Rng,
-) -> Result<(Vec<Array2<f64>>, Vec<Array2<f64>>, usize), CalibrationError> {
+) -> Result<(Vec<Array2<f64>>, Vec<Array2<f64>>, usize), Error> {
     for igs in 0..n_complexes {
         let mut cx = complexes[igs].clone();
         let mut cf = complex_objectives[igs].clone();
@@ -417,9 +545,9 @@ fn evolve_complexes(
                 sf.view(),
                 lower_bounds,
                 upper_bounds,
-                model,
-                precipitation,
-                pet,
+                simulate,
+                data,
+                metadata,
                 observations,
                 objective_idx,
                 is_minimization,
@@ -484,15 +612,15 @@ fn evolve_complexes_competitively(
     simplex_objectives: ArrayView2<f64>,
     lower_bounds: ArrayView1<f64>,
     upper_bounds: ArrayView1<f64>,
-    model: SimulateFn,
-    precipitation: ArrayView1<f64>,
-    pet: ArrayView1<f64>,
+    simulate: &SimulateFn,
+    data: &Data,
+    metadata: &Metadata,
     observations: ArrayView1<f64>,
     objective_idx: usize,
     is_minimization: bool,
     n_calls: usize,
     rng: &mut ChaCha8Rng,
-) -> Result<(Array1<f64>, Array1<f64>, usize), CalibrationError> {
+) -> Result<(Array1<f64>, Array1<f64>, usize), Error> {
     let alpha = 1.0;
     let beta = 0.5;
 
@@ -535,14 +663,14 @@ fn evolve_complexes_competitively(
     }
 
     // evaluate reflection point
-    let simulation = model(snew.view(), precipitation, pet)?;
+    let simulation = simulate(&snew, data, metadata)?;
     let mut fnew = evaluate_simulation(observations, simulation.view())?;
     let mut n_calls = n_calls + 1;
 
     // if reflection failed (worse than worst), try contraction
     if is_worse(fnew[objective_idx], fw) {
         snew = sw.to_owned() + beta * (&ce - &sw);
-        let simulation = model(snew.view(), precipitation, pet)?;
+        let simulation = simulate(&snew, data, metadata)?;
         fnew = evaluate_simulation(observations, simulation.view())?;
         n_calls += 1;
 
@@ -554,7 +682,7 @@ fn evolve_complexes_competitively(
                 rng,
             );
             snew = &random_values * &range + lower_bounds;
-            let simulation = model(snew.view(), precipitation, pet)?;
+            let simulation = simulate(&snew, data, metadata)?;
             fnew = evaluate_simulation(observations, simulation.view())?;
             n_calls += 1;
         }
@@ -586,99 +714,8 @@ fn merge_complexes(
     sort_population(population, objectives, objective_idx, is_minimization)
 }
 
-#[gen_stub_pymethods]
-#[pymethods]
-impl SCE {
-    #[new]
-    pub fn py_new(
-        model: &str,
-        param_bounds: Vec<(f64, f64)>,
-        objective: &str,
-        n_complexes: usize,
-        k_stop: usize,
-        p_convergence_threshold: f64,
-        geometric_range_threshold: f64,
-        max_evaluations: usize,
-        seed: u64,
-    ) -> PyResult<Self> {
-        let objective = Objective::from_str(objective)
-            .map_err(pyo3::exceptions::PyValueError::new_err)?;
-        SCE::new(
-            model,
-            param_bounds,
-            objective,
-            n_complexes,
-            k_stop,
-            p_convergence_threshold,
-            geometric_range_threshold,
-            max_evaluations,
-            seed,
-        )
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-    }
-
-    #[pyo3(name = "init")]
-    pub fn py_init(
-        &mut self,
-        precipitation: PyReadonlyArray1<'_, f64>,
-        pet: PyReadonlyArray1<'_, f64>,
-        observations: PyReadonlyArray1<'_, f64>,
-    ) -> PyResult<()> {
-        self.init(
-            precipitation.as_array(),
-            pet.as_array(),
-            observations.as_array(),
-        )
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-    }
-
-    #[pyo3(name = "step")]
-    pub fn py_step(
-        &mut self,
-        precipitation: PyReadonlyArray1<'_, f64>,
-        pet: PyReadonlyArray1<'_, f64>,
-        observations: PyReadonlyArray1<'_, f64>,
-    ) -> PyResult<()> {
-        self.step(
-            precipitation.as_array(),
-            pet.as_array(),
-            observations.as_array(),
-        )
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-    }
-
-    #[getter]
-    pub fn best_params<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> Bound<'py, PyArray1<f64>> {
-        self.best_params.to_pyarray(py)
-    }
-
-    #[getter]
-    pub fn done(&self) -> bool {
-        self.done
-    }
-
-    #[getter]
-    pub fn last_objectives<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> Bound<'py, PyArray1<f64>> {
-        self.objectives.row(0).to_pyarray(py)
-    }
-
-    #[getter]
-    pub fn last_simulation<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> Bound<'py, PyArray1<f64>> {
-        self.best_simulation.to_pyarray(py)
-    }
-}
-
 pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     let m = PyModule::new(py, "sce")?;
-    m.add_class::<SCE>()?;
+    m.add_class::<Sce>()?;
     Ok(m)
 }

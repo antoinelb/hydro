@@ -1,9 +1,10 @@
-from .climate import ClimateModels
-from .data import PetModels, SnowModels, read_datasets
+from .climate import ClimateModel
+from .data import PetModel, read_datasets
+from .snow import SnowModel
 
 __all__ = [
-    "ClimateModels",
-    "PetModels",
-    "SnowModels",
+    "ClimateModel",
+    "PetModel",
+    "SnowModel",
     "read_datasets",
 ]

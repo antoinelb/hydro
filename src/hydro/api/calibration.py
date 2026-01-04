@@ -2,12 +2,13 @@ import asyncio
 from typing import Any, get_args
 
 import polars as pl
+from hydro_rs.metrics import calculate_kge, calculate_nse, calculate_rmse
 from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from hydro.data import (
-    ClimateModels,
-    SnowModels,
+    ClimateModel,
+    SnowModel,
     calibration,
     climate,
     hydro,
@@ -48,15 +49,15 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
     match msg.get("type"):
         case "models":
             models = {
-                "snow": [*get_args(SnowModels), None],
+                "snow": [*get_args(SnowModel), None],
                 "climate": [
-                    m for m in get_args(ClimateModels) if m != "day_median"
+                    m for m in get_args(ClimateModel) if m != "day_median"
                 ],
-                "objectives": get_args(calibration.ObjectiveFunctions),
-                "transformations": get_args(calibration.Transformations),
+                "objectives": get_args(calibration.Objective),
+                "transformations": get_args(calibration.Transformation),
                 "algorithms": {
                     algorithm: calibration.get_algorithm_params(algorithm)
-                    for algorithm in get_args(calibration.Algorithms)
+                    for algorithm in get_args(calibration.Algorithm)
                 },
             }
             await _send(ws, "models", models)
@@ -117,16 +118,28 @@ async def _handle_observations_message(
     metadata = await hydro.read_metadata(id)
 
     model = climate.get_model("day_median")
-    model = await model.calibrate(calib_data, metadata)
-    _predictions = model(calib_data)
+    params = await calibration.calibrate(
+        calib_data, metadata, "day_median", None, "rmse", "sce", {}
+    )
+    _predictions = model.simulate(params, calib_data, metadata)
     predictions = calib_data.select("date").with_columns(
         pl.Series("discharge", _predictions)
     )
-    results = climate.evaluate_model(
-        calib_data["discharge"].to_numpy(), _predictions
-    )
-
     observations = calib_data.select("date", "discharge")
+    results = {
+        "rmse": calculate_rmse(
+            observations["discharge"].to_numpy(),
+            predictions["discharge"].to_numpy(),
+        ),
+        "nse": calculate_nse(
+            observations["discharge"].to_numpy(),
+            predictions["discharge"].to_numpy(),
+        ),
+        "kge": calculate_kge(
+            observations["discharge"].to_numpy(),
+            predictions["discharge"].to_numpy(),
+        ),
+    }
 
     await _send(
         ws,
@@ -151,6 +164,7 @@ async def _handle_calibration_start_message(
             "pet_model",
             "n_valid_years",
             "climate_model",
+            "snow_model",
             "algorithm",
             "objective",
             "algorithm_params",
@@ -159,7 +173,7 @@ async def _handle_calibration_start_message(
         await _send(
             ws,
             "error",
-            "`station`, `pet_model`, `n_valid_years`, `climate_model`, `algorithm`, `objective` and `algorithm_params` must be provided.",
+            "`station`, `pet_model`, `n_valid_years`, `climate_model`, `snow_model`, `algorithm`, `objective` and `algorithm_params` must be provided.",
         )
         return
 
@@ -170,11 +184,20 @@ async def _handle_calibration_start_message(
     )
     metadata = await hydro.read_metadata(id)
 
-    model = climate.get_model(msg_data["climate_model"])
+    params = calibration.calibrate(
+        calib_data,
+        metadata,
+        msg_data["climate_model"],
+        msg_data["snow_model"],
+        msg_data["objective"],
+        msg_data["algorithm"],
+        msg_data["algorithm_params"],
+    )
 
     async def callback(
         done: bool, predictions: pl.DataFrame, results: dict[str, float]
     ) -> None:
+        print(results)
         await _send(
             ws,
             "calibration_step",
@@ -186,12 +209,14 @@ async def _handle_calibration_start_message(
             },
         )
 
-    model = await model.calibrate(
+    params = await calibration.calibrate(
         calib_data,
         metadata,
-        algorithm=msg_data["algorithm"],
-        objective=msg_data["objective"],
-        algorithm_params=msg_data["algorithm_params"],
+        msg_data["climate_model"],
+        msg_data["snow_model"],
+        msg_data["objective"],
+        msg_data["algorithm"],
+        msg_data["algorithm_params"],
         callback=callback,
         stop_event=stop_event,
     )

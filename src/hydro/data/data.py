@@ -11,8 +11,7 @@ from . import hydro, precipitation, weather
 # types #
 #########
 
-PetModels = Literal["oudin"]
-SnowModels = Literal["cemaneige"]
+PetModel = Literal["oudin"]
 
 ##########
 # public #
@@ -21,7 +20,7 @@ SnowModels = Literal["cemaneige"]
 
 async def read_datasets(
     id: str,
-    pet_model: PetModels,
+    pet_model: PetModel,
     n_valid_years: int,
     *,
     refresh: bool = False,
@@ -69,7 +68,7 @@ async def _read_joined_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
 async def _add_pet_data(
     id: str,
     data: pl.DataFrame,
-    pet_model: PetModels,
+    pet_model: PetModel,
     *,
     refresh: bool = False,
 ) -> pl.DataFrame:

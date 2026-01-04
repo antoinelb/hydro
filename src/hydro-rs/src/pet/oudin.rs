@@ -1,9 +1,7 @@
 use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::prelude::*;
-use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use std::f64::consts::PI;
 
-#[gen_stub_pyfunction(module = "hydro_rs.pet.oudin")]
 #[pyfunction]
 fn simulate<'py>(
     py: Python<'py>,

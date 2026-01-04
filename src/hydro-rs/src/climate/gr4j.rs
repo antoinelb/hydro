@@ -1,28 +1,29 @@
-use crate::climate::utils::ClimateError;
-use ndarray::{Array1, ArrayView1};
-use numpy::{PyArray1, PyReadonlyArray1, ToPyArray};
+use ndarray::{array, Array1, Array2, Axis};
+use numpy::{PyArray1, PyArray2, PyReadonlyArray1, ToPyArray};
 use pyo3::prelude::*;
-use pyo3_stub_gen::derive::gen_stub_pyfunction;
+
+use crate::model::{Data, Error, Metadata, PyData, PyMetadata};
+
+pub fn init() -> (Array1<f64>, Array2<f64>) {
+    // corresponds to x1, x2, x3, x4
+    let bounds =
+        array![[10.0, 1500.0], [-5.0, 3.0], [10.0, 400.0], [0.8, 10.0]];
+    let default_values = bounds.sum_axis(Axis(1)) / 2.0;
+    (default_values, bounds)
+}
 
 pub fn simulate(
-    params: ArrayView1<f64>,
-    precipitation: ArrayView1<f64>,
-    pet: ArrayView1<f64>,
-) -> Result<Array1<f64>, ClimateError> {
+    params: &Array1<f64>,
+    data: &Data,
+    _metadata: &Metadata,
+) -> Result<Array1<f64>, Error> {
     let [x1, x2, x3, x4]: [f64; 4] = params
         .as_slice()
         .and_then(|s| s.try_into().ok())
-        .ok_or_else(|| ClimateError::ParamsMismatch(4, params.len()))?;
+        .ok_or_else(|| Error::ParamsMismatch(4, params.len()))?;
 
-    if precipitation.len() != pet.len() {
-        return Err(ClimateError::LengthMismatch(
-            precipitation.len(),
-            pet.len(),
-        ));
-    }
-
-    let precipitation_ = precipitation.as_slice().unwrap();
-    let pet_ = pet.as_slice().unwrap();
+    let precipitation = &data.precipitation;
+    let pet = &data.pet;
 
     let mut discharge: Vec<f64> = vec![];
 
@@ -37,13 +38,9 @@ pub fn simulate(
         vec![0.0; unit_hydrographs.1.len()],
     );
 
-    for t in 0..precipitation_.len() {
-        (production_store, routing_precipitation) = update_production(
-            production_store,
-            precipitation_[t],
-            pet_[t],
-            x1,
-        );
+    for t in 0..precipitation.len() {
+        (production_store, routing_precipitation) =
+            update_production(production_store, precipitation[t], pet[t], x1);
         (routing_store, hydrographs, discharge_) = update_routing(
             routing_store,
             hydrographs,
@@ -191,23 +188,34 @@ fn update_hydrographs(
     (hydrograph_1, hydrograph_2)
 }
 
-#[gen_stub_pyfunction(module = "hydro_rs.climate.gr4j")]
+#[pyfunction]
+#[pyo3(name = "init")]
+pub fn py_init<'py>(
+    py: Python<'py>,
+) -> (Bound<'py, PyArray1<f64>>, Bound<'py, PyArray2<f64>>) {
+    let (default_values, bounds) = init();
+    (default_values.to_pyarray(py), bounds.to_pyarray(py))
+}
+
 #[pyfunction]
 #[pyo3(name = "simulate")]
 pub fn py_simulate<'py>(
     py: Python<'py>,
-    params: PyReadonlyArray1<'py, f64>,
-    precipitation: PyReadonlyArray1<'py, f64>,
-    pet: PyReadonlyArray1<'py, f64>,
+    params: PyReadonlyArray1<f64>,
+    data: PyData,
+    metadata: PyMetadata,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    Ok(
-        simulate(params.as_array(), precipitation.as_array(), pet.as_array())?
-            .to_pyarray(py),
-    )
+    let simulation = simulate(
+        &params.as_array().to_owned(),
+        &data.into_data()?,
+        &metadata.into_metadata(),
+    )?;
+    Ok(simulation.to_pyarray(py))
 }
 
 pub fn make_module(py: Python<'_>) -> PyResult<Bound<'_, PyModule>> {
     let m = PyModule::new(py, "gr4j")?;
+    m.add_function(wrap_pyfunction!(py_init, &m)?)?;
     m.add_function(wrap_pyfunction!(py_simulate, &m)?)?;
     Ok(m)
 }

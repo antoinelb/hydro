@@ -8,6 +8,7 @@ from typing import Literal, NamedTuple, assert_never, cast
 import geopandas as gpd
 import httpx
 import numpy as np
+import numpy.typing as npt
 import polars as pl
 import rasterio
 import rasterio.mask
@@ -25,7 +26,7 @@ class Metadata(NamedTuple):
     station: str
     lat: float
     lon: float
-    elevation_bands: list[float]
+    elevation_layers: npt.NDArray[np.float64]
     median_elevation: float
 
 
@@ -89,7 +90,15 @@ async def read_metadata(id: str) -> Metadata:
     if path.exists():
         with open(path, "r") as f:
             metadata = json.load(f)
-            return Metadata(*metadata)
+            return Metadata(
+                id=metadata["id"],
+                name=metadata["name"],
+                station=metadata["station"],
+                lat=metadata["lat"],
+                lon=metadata["lon"],
+                elevation_layers=np.array(metadata["elevation_layers"]),
+                median_elevation=metadata["median_elevation"],
+            )
     else:
         stations = read_stations()
         stations = stations.filter(pl.col("id") == id)
@@ -102,13 +111,18 @@ async def read_metadata(id: str) -> Metadata:
             station=stations[0, "station"],
             lat=stations[0, "lat"],
             lon=stations[0, "lon"],
-            elevation_bands=cast(
-                list[float], watershed_data["elevation_bands"]
-            ),
-            median_elevation=float(watershed_data["median_elevation"]),
+            elevation_layers=np.array(watershed_data["elevation_bands"]),
+            median_elevation=cast(float, watershed_data["median_elevation"]),
         )
         with open(path, "w") as f:
-            json.dump(metadata, f)
+            json.dump(
+                {
+                    **metadata._asdict(),
+                    "elevation_layers": metadata.elevation_layers.tolist(),
+                },
+                f,
+                indent=2,
+            )
         return metadata
 
 

@@ -5,7 +5,7 @@ from starlette.routing import BaseRoute, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from hydro.data import (
-    PetModels,
+    PetModel,
     hydro,
     precipitation,
     read_datasets,
@@ -63,7 +63,7 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
 
 
 async def _handle_models_message(ws: WebSocket) -> None:
-    models = {"pet": get_args(PetModels)}
+    models = {"pet": get_args(PetModel)}
     await _send(ws, "models", convert_for_json(models))
 
 
@@ -76,7 +76,7 @@ async def _handle_model_message(
 
     match msg_data["type"]:
         case "pet":
-            if msg_data["val"] in get_args(PetModels):
+            if msg_data["val"] in get_args(PetModel):
                 await _send(ws, "model", msg_data)
         case _:
             await _send(ws, "error", "The only valid types are pet and snow.")
