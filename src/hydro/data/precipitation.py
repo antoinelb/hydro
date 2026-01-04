@@ -20,21 +20,9 @@ async def read_data(
     lat = round(hydro_data[0, "lat"], 2)
     lon = round(hydro_data[0, "lon"], 2)
 
-    path = (
-        paths.data_dir
-        / "raw"
-        / "precipitation"
-        / f"{lat:.2f}_{lon:.2f}_{date_start}_{date_end}.ipc"
+    precipitation_data = await _fetch_precipitation_data(
+        date_start, date_end, lat, lon, n_concurrent=n_concurrent
     )
-
-    if path.exists() and not refresh:
-        precipitation_data = pl.read_ipc(path)
-    else:
-        path.parent.mkdir(exist_ok=True, parents=True)
-        precipitation_data = await _fetch_precipitation_data(
-            date_start, date_end, lat, lon, n_concurrent=n_concurrent
-        )
-        precipitation_data.write_ipc(path)
 
     return hydro_data.select("date").join(precipitation_data, on="date")
 
@@ -67,13 +55,62 @@ async def _fetch_precipitation_data(
     async with httpx.AsyncClient() as client:
         _data = await asyncio.gather(
             *[
+                _read_daily_precipitation_data_for_year(
+                    semaphore,
+                    client,
+                    base_url,
+                    lat,
+                    lon,
+                    (
+                        date_start
+                        if date_start.year == year
+                        else date(year, 1, 1)
+                    ),
+                    date_end if date_end.year == year else date(year, 12, 31),
+                )
+                for year in range(date_start.year, date_end.year + 1)
+            ]
+        )
+        return pl.concat(_data).sort("date")
+
+
+async def _read_daily_precipitation_data_for_year(
+    semaphore: asyncio.Semaphore,
+    client: httpx.AsyncClient,
+    base_url: str,
+    lat: float,
+    lon: float,
+    date_start: date,
+    date_end: date,
+    *,
+    refresh: bool = False,
+) -> pl.DataFrame:
+    path = (
+        paths.data_dir
+        / "raw"
+        / "precipitation"
+        / f"{lat:.2f}_{lon:.2f}_{date_start}_{date_end}.ipc"
+    )
+
+    if path.exists() and not refresh:
+        return pl.read_ipc(path)
+    else:
+        print(f"Downloading data for {date_start.year}...")
+        path.parent.mkdir(exist_ok=True, parents=True)
+        for p in path.parent.glob(f"{lat:.2f}_{lon:.2f}_{date_start}_*.ipc"):
+            p.unlink()
+        _data = await asyncio.gather(
+            *[
                 _read_daily_precipitation_data(
                     semaphore, client, base_url, date_start + timedelta(days=i)
                 )
                 for i in range((date_end - date_start).days + 1)
             ]
         )
-    return pl.DataFrame([d for d in _data if d])
+        data = pl.DataFrame([d for d in _data if d])
+        data.write_ipc(path)
+        print(f"Downloaded data for {date_start.year}.")
+        return data
 
 
 async def _read_daily_precipitation_data(

@@ -1,9 +1,10 @@
+#![allow(clippy::type_complexity)]
+
 use crate::metrics::MetricsError;
-use ndarray::{s, Array1, Array2, Axis};
+use ndarray::{s, Array1, Array2, ArrayView1, Axis};
 use numpy::PyReadonlyArray1;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,27 +25,20 @@ impl From<Error> for PyErr {
     }
 }
 
-/// Shared data that doesn't change during calibration (cheap to clone via Arc)
-#[derive(Clone)]
-pub struct SharedData {
-    pub temperature: Arc<Vec<f64>>,
-    pub pet: Arc<Vec<f64>>,
-    pub day_of_year: Arc<Vec<usize>>,
+#[derive(Clone, Copy)]
+pub struct Data<'a> {
+    pub precipitation: ArrayView1<'a, f64>, // mm/day
+    pub temperature: ArrayView1<'a, f64>,   // °C
+    pub pet: ArrayView1<'a, f64>,           // mm/day
+    pub day_of_year: ArrayView1<'a, usize>, // 1-365
 }
 
-/// Full data including precipitation (which changes when composing snow + climate models)
-#[derive(Clone)]
-pub struct Data {
-    pub precipitation: Vec<f64>,
-    pub shared: SharedData,
-}
-
-impl Data {
+impl<'a> Data<'a> {
     pub fn new(
-        precipitation: Vec<f64>,
-        temperature: Vec<f64>,
-        pet: Vec<f64>,
-        day_of_year: Vec<usize>,
+        precipitation: ArrayView1<'a, f64>,
+        temperature: ArrayView1<'a, f64>,
+        pet: ArrayView1<'a, f64>,
+        day_of_year: ArrayView1<'a, usize>,
     ) -> Result<Self, Error> {
         if precipitation.len() != temperature.len()
             || precipitation.len() != pet.len()
@@ -60,43 +54,28 @@ impl Data {
 
         Ok(Data {
             precipitation,
-            shared: SharedData {
-                temperature: Arc::new(temperature),
-                pet: Arc::new(pet),
-                day_of_year: Arc::new(day_of_year),
-            },
+            temperature,
+            pet,
+            day_of_year,
         })
     }
-
-    /// Create a new Data with replaced precipitation, sharing the other fields
-    pub fn with_precipitation(&self, precipitation: Vec<f64>) -> Self {
-        Data {
-            precipitation,
-            shared: self.shared.clone(), // Cheap: just increments Arc refcounts
-        }
-    }
-
-    // Convenience accessors
-    pub fn temperature(&self) -> &[f64] {
-        &self.shared.temperature
-    }
-
-    pub fn pet(&self) -> &[f64] {
-        &self.shared.pet
-    }
-
-    pub fn day_of_year(&self) -> &[usize] {
-        &self.shared.day_of_year
-    }
 }
 
-pub struct Metadata {
-    pub elevation_layers: Array1<f64>,
-    pub median_elevation: f64,
+pub struct Metadata<'a> {
+    pub area: f64,                             // km^2
+    pub elevation_layers: ArrayView1<'a, f64>, // m
+    pub median_elevation: f64,                 // m
 }
 
-pub type SimulateFn =
-    Box<dyn Fn(&Array1<f64>, &Data, &Metadata) -> Result<Array1<f64>, Error>>;
+pub type SimulateFn = Box<
+    dyn for<'a, 'b, 'c> Fn(
+            ArrayView1<'a, f64>,
+            Data<'b>,
+            &Metadata<'c>,
+        ) -> Result<Array1<f64>, Error>
+        + Send
+        + Sync,
+>;
 
 pub fn compose_init(
     snow_init: fn() -> (Array1<f64>, Array2<f64>),
@@ -107,12 +86,12 @@ pub fn compose_init(
         let (climate_defaults, climate_bounds) = climate_init();
         let default_values = ndarray::concatenate(
             Axis(0),
-            &vec![snow_defaults.view(), climate_defaults.view()],
+            &[snow_defaults.view(), climate_defaults.view()],
         )
         .unwrap();
         let bounds = ndarray::concatenate(
             Axis(0),
-            &vec![snow_bounds.view(), climate_bounds.view()],
+            &[snow_bounds.view(), climate_bounds.view()],
         )
         .unwrap();
 
@@ -120,28 +99,33 @@ pub fn compose_init(
     }
 }
 
+pub type SimulateFnPtr = for<'a, 'b, 'c> fn(
+    ArrayView1<'a, f64>,
+    Data<'b>,
+    &Metadata<'c>,
+) -> Result<Array1<f64>, Error>;
+
 pub fn compose_simulate(
-    snow_simulate: fn(
-        &Array1<f64>,
-        &Data,
-        &Metadata,
-    ) -> Result<Vec<f64>, Error>,
-    climate_simulate: fn(
-        &Array1<f64>,
-        &Data,
-        &Metadata,
-    ) -> Result<Vec<f64>, Error>,
+    snow_simulate: SimulateFnPtr,
+    climate_simulate: SimulateFnPtr,
     n_snow_params: usize,
-) -> impl Fn(&Array1<f64>, &Data, &Metadata) -> Result<Vec<f64>, Error> {
-    move |params, data, metadata| {
-        let snow_params = params.slice(s![..n_snow_params]).to_owned();
-        let climate_params = params.slice(s![n_snow_params..]).to_owned();
+) -> SimulateFn {
+    Box::new(move |params, data, metadata| {
+        let snow_params = params.slice(s![..n_snow_params]);
+        let climate_params = params.slice(s![n_snow_params..]);
+
         let effective_precipitation =
-            snow_simulate(&snow_params, &data, &metadata)?;
-        // Use with_precipitation for cheap cloning (just Arc refcount increments)
-        let data = data.with_precipitation(effective_precipitation);
-        climate_simulate(&climate_params, &data, &metadata)
-    }
+            snow_simulate(snow_params, data, metadata)?;
+
+        let climate_data = Data {
+            precipitation: effective_precipitation.view(),
+            temperature: data.temperature,
+            pet: data.pet,
+            day_of_year: data.day_of_year,
+        };
+
+        climate_simulate(climate_params, climate_data, metadata)
+    })
 }
 
 #[derive(FromPyObject)]
@@ -152,27 +136,29 @@ pub struct PyData<'py> {
     pub day_of_year: PyReadonlyArray1<'py, usize>,
 }
 
-impl PyData<'_> {
-    pub fn into_data(self) -> Result<Data, Error> {
+impl<'py> PyData<'py> {
+    pub fn as_data(&self) -> Result<Data<'_>, Error> {
         Data::new(
-            self.precipitation.as_array().to_owned(),
-            self.temperature.as_array().to_owned(),
-            self.pet.as_array().to_owned(),
-            self.day_of_year.as_array().to_owned(),
+            self.precipitation.as_array(),
+            self.temperature.as_array(),
+            self.pet.as_array(),
+            self.day_of_year.as_array(),
         )
     }
 }
 
 #[derive(FromPyObject)]
 pub struct PyMetadata<'py> {
+    pub area: f64,
     pub elevation_layers: PyReadonlyArray1<'py, f64>,
     pub median_elevation: f64,
 }
 
-impl PyMetadata<'_> {
-    pub fn into_metadata(self) -> Metadata {
+impl<'py> PyMetadata<'py> {
+    pub fn as_metadata(&self) -> Metadata<'_> {
         Metadata {
-            elevation_layers: self.elevation_layers.as_array().to_owned(),
+            area: self.area,
+            elevation_layers: self.elevation_layers.as_array(),
             median_elevation: self.median_elevation,
         }
     }

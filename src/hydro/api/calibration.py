@@ -82,7 +82,6 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
                 )
             )
         case "calibration_stop":
-            print("TEST")
             model = msg.get("data", None)
             if model is None:
                 await _send(
@@ -91,9 +90,6 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
                     "The model must be provided.",
                 )
                 return
-            print(
-                f"{model}_stop_event", hasattr(ws.state, f"{model}_stop_event")
-            )
             if hasattr(ws.state, f"{model}_stop_event"):
                 getattr(ws.state, f"{model}_stop_event").set()
         case _:

@@ -1,4 +1,4 @@
-use ndarray::{array, Array1, Array2};
+use ndarray::{array, Array1, Array2, ArrayView1};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, ToPyArray};
 use pyo3::prelude::*;
 
@@ -15,8 +15,8 @@ pub fn init() -> (Array1<f64>, Array2<f64>) {
 }
 
 pub fn simulate(
-    params: &Array1<f64>,
-    data: &Data,
+    params: ArrayView1<f64>,
+    data: Data,
     metadata: &Metadata,
 ) -> Result<Array1<f64>, Error> {
     let [ctg, kf, qnbv]: [f64; 3] = params
@@ -24,10 +24,10 @@ pub fn simulate(
         .and_then(|s| s.try_into().ok())
         .ok_or_else(|| Error::ParamsMismatch(3, params.len()))?;
 
-    let precipitation = &data.precipitation;
-    let temperature = &data.temperature;
-    let day_of_year = &data.day_of_year;
-    let elevation_layers = &metadata.elevation_layers;
+    let precipitation = data.precipitation;
+    let temperature = data.temperature;
+    let day_of_year = data.day_of_year;
+    let elevation_layers = metadata.elevation_layers;
     let median_elevation = metadata.median_elevation;
 
     let beta = 0.0;
@@ -131,11 +131,8 @@ pub fn py_simulate<'py>(
     data: PyData,
     metadata: PyMetadata,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    let simulation = simulate(
-        &params.as_array().to_owned(),
-        &data.into_data()?,
-        &metadata.into_metadata(),
-    )?;
+    let simulation =
+        simulate(params.as_array(), data.as_data()?, &metadata.as_metadata())?;
     Ok(simulation.to_pyarray(py))
 }
 

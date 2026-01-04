@@ -26,6 +26,7 @@ class Metadata(NamedTuple):
     station: str
     lat: float
     lon: float
+    area: float
     elevation_layers: npt.NDArray[np.float64]
     median_elevation: float
 
@@ -96,6 +97,7 @@ async def read_metadata(id: str) -> Metadata:
                 station=metadata["station"],
                 lat=metadata["lat"],
                 lon=metadata["lon"],
+                area=metadata["area"],
                 elevation_layers=np.array(metadata["elevation_layers"]),
                 median_elevation=metadata["median_elevation"],
             )
@@ -111,6 +113,7 @@ async def read_metadata(id: str) -> Metadata:
             station=stations[0, "station"],
             lat=stations[0, "lat"],
             lon=stations[0, "lon"],
+            area=stations[0, "area"],
             elevation_layers=np.array(watershed_data["elevation_bands"]),
             median_elevation=cast(float, watershed_data["median_elevation"]),
         )
@@ -168,6 +171,7 @@ async def _fetch_dataset(
     reading = False
     lat = None
     lon = None
+    area = None
 
     for line in resp.text.split("\n"):
         if line.startswith("Coordonnées:"):
@@ -189,6 +193,8 @@ async def _fetch_dataset(
                 float(match.group(5)),
                 float(match.group(6)),
             )
+        if line.startswith("Bassin versant:"):
+            area = float(line.split()[2])
         elif line.startswith("Station") and not line.startswith("Station:"):
             reading = True
         elif reading:
@@ -205,6 +211,7 @@ async def _fetch_dataset(
         pl.col("date").str.strptime(pl.Date, "%Y/%m/%d"),
         pl.lit(lat).alias("lat"),
         pl.lit(lon).alias("lon"),
+        pl.lit(area).alias("area"),
     )
 
 

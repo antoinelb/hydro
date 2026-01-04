@@ -1,6 +1,12 @@
 import { create, clear, createCheckbox } from "./utils/elements.js";
 import { connect } from "./utils/ws.js";
-import { toTitle, formatNumber, frenchLocale, round } from "./utils/misc.js";
+import {
+  range,
+  toTitle,
+  formatNumber,
+  frenchLocale,
+  round,
+} from "./utils/misc.js";
 
 /*********/
 /* model */
@@ -859,7 +865,7 @@ function metricView(model, metric) {
     _svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
 
     const boundaries = {
-      l: 25,
+      l: 50,
       r: width - 5,
       t: 15,
       b: height - 50,
@@ -869,20 +875,19 @@ function metricView(model, metric) {
 
     const data = Object.entries(model.predictions).map(([m, results], i) => ({
       model: m,
-      value: results[results.length - 1].results[metric],
+      values: results.map((r) => r.results[metric]),
       colour: model.colours[i + 1],
     }));
 
     const xScale = d3
-      .scaleBand()
-      .domain(d3.extent(data, (d) => d.model))
-      .range([boundaries.l, boundaries.r])
-      .padding(0.1);
+      .scaleLinear()
+      .domain([1, d3.max(data, (d) => d.values.length)])
+      .range([boundaries.l, boundaries.r]);
     const yScale = d3
       .scaleLinear()
       .domain([
-        Math.min(0, Math.floor(d3.min(data, (d) => d.value))),
-        Math.max(1, Math.ceil(d3.max(data, (d) => d.value))),
+        Math.min(0, Math.floor(d3.min(data, (d) => Math.min(...d.values)))),
+        Math.max(1, Math.ceil(d3.max(data, (d) => Math.max(...d.values)))),
       ])
       .range([boundaries.b, boundaries.t]);
 
@@ -891,15 +896,14 @@ function metricView(model, metric) {
       .append("g")
       .attr("class", "x-axis")
       .attr("transform", `translate(0, ${boundaries.b})`)
-      .call(d3.axisBottom(xScale));
+      .call(d3.axisBottom(xScale).ticks(0));
     xAxis.selectAll("text").remove();
     // y axis
     const yAxis = svg
       .append("g")
       .attr("class", "y-axis")
       .attr("transform", `translate(${boundaries.l}, 0)`)
-      .call(d3.axisLeft(yScale).ticks(0));
-    yAxis.selectAll("text").remove();
+      .call(d3.axisLeft(yScale).ticks(3));
     svg
       .append("text")
       .attr("x", 10)
@@ -913,28 +917,31 @@ function metricView(model, metric) {
       .attr("font-size", "0.9rem")
       .text(metric);
 
-    // bands
-    svg
-      .selectAll("rect")
-      .data(data)
-      .join("rect")
-      .attr("class", (d) => d.colour)
-      .attr("x", (d) => xScale(d.model))
-      .attr("y", (d) => yScale(d.value))
-      .attr("width", xScale.bandwidth())
-      .attr("height", (d) => yScale(yScale.domain()[0]) - yScale(d.value));
-    // values
-    svg
-      .append("g")
-      .selectAll("text")
-      .attr("class", "text-values")
-      .data(data)
-      .join("text")
-      .attr("x", (d) => xScale(d.model) + xScale.bandwidth() / 2)
-      .attr("y", (d) => yScale(d.value))
-      .attr("dy", -5)
-      .attr("text-anchor", "middle")
-      .attr("font-size", "0.9rem")
-      .text((d) => round(d.value, 2));
+    // data
+    data.forEach((_data) => {
+      const values =
+        _data.values.length > 1
+          ? _data.values
+          : range(xScale.domain()[1]).map((_) => _data.values[0]);
+      svg
+        .append("path")
+        .attr("class", _data.colour)
+        .datum(values)
+        .attr(
+          "d",
+          d3
+            .line()
+            .x((d, i) => xScale(i + 1))
+            .y((d) => yScale(d)),
+        );
+      svg
+        .selectAll(`.circle-${_data.model}`)
+        .data(values)
+        .join("circle")
+        .attr("class", `circle-${_data.model} ${_data.colour}`)
+        .attr("cx", (d, i) => xScale(i + 1))
+        .attr("cy", (d) => yScale(d))
+        .attr("r", 2);
+    });
   }
 }

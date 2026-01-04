@@ -1,4 +1,4 @@
-use ndarray::{array, Array1, Array2, Axis};
+use ndarray::{array, Array1, Array2, ArrayView1, Axis};
 use numpy::{PyArray1, PyArray2, PyReadonlyArray1, ToPyArray};
 use pyo3::prelude::*;
 
@@ -13,24 +13,25 @@ pub fn init() -> (Array1<f64>, Array2<f64>) {
 }
 
 pub fn simulate(
-    params: &Array1<f64>,
-    data: &Data,
-    _metadata: &Metadata,
+    params: ArrayView1<f64>,
+    data: Data,
+    metadata: &Metadata,
 ) -> Result<Array1<f64>, Error> {
     let [x1, x2, x3, x4]: [f64; 4] = params
         .as_slice()
         .and_then(|s| s.try_into().ok())
         .ok_or_else(|| Error::ParamsMismatch(4, params.len()))?;
 
-    let precipitation = &data.precipitation;
-    let pet = &data.pet;
+    let precipitation = data.precipitation;
+    let pet = data.pet;
+    let area = metadata.area;
 
     let mut discharge: Vec<f64> = vec![];
 
     let mut production_store = x1 / 2.;
     let mut routing_store = x3 / 2.;
-    let mut routing_precipitation: f64;
-    let mut discharge_: f64;
+    let mut routing_precipitation: f64 = 0.0;
+    let mut discharge_: f64 = 0.0;
 
     let unit_hydrographs = create_unit_hydrographs(x4);
     let mut hydrographs = (
@@ -39,16 +40,23 @@ pub fn simulate(
     );
 
     for t in 0..precipitation.len() {
-        (production_store, routing_precipitation) =
-            update_production(production_store, precipitation[t], pet[t], x1);
-        (routing_store, hydrographs, discharge_) = update_routing(
-            routing_store,
-            hydrographs,
+        update_production(
+            &mut production_store,
+            &mut routing_precipitation,
+            precipitation[t],
+            pet[t],
+            x1,
+        );
+        update_routing(
+            &mut routing_store,
+            &mut hydrographs,
+            &mut discharge_,
             &unit_hydrographs,
             routing_precipitation,
             x2,
             x3,
         );
+        discharge_ = discharge_ * 1000.0 * area / (3600.0 * 24.0); // mm/day to m^3/s
         discharge.push(discharge_);
     }
 
@@ -62,7 +70,7 @@ fn create_unit_hydrographs(x4: f64) -> (Vec<f64>, Vec<f64>) {
         } else if i >= x4 {
             1.
         } else {
-            (i / x4).powf(1.25)
+            (i / x4).powf(2.5)
         }
     };
 
@@ -72,9 +80,9 @@ fn create_unit_hydrographs(x4: f64) -> (Vec<f64>, Vec<f64>) {
         } else if i >= 2. * x4 {
             1.
         } else if i < x4 {
-            0.5 * (i / x4).powf(1.25)
+            0.5 * (i / x4).powf(2.5)
         } else {
-            1. - 0.5 * (2. - i / x4).powf(1.25)
+            1. - 0.5 * (2. - i / x4).powf(2.5)
         }
     };
 
@@ -89,103 +97,88 @@ fn create_unit_hydrographs(x4: f64) -> (Vec<f64>, Vec<f64>) {
 }
 
 fn update_production(
-    store: f64,
+    store: &mut f64,
+    routing_precipitation: &mut f64,
     precipitation: f64,
     pet: f64,
     x1: f64,
-) -> (f64, f64) {
-    let (store, store_precipitation, net_precipitation) =
-        if precipitation > pet {
-            let net_precipitation = precipitation - pet;
-            // only calculate terms once
-            let tmp_term_1 = store / x1;
-            let tmp_term_2 = (net_precipitation / x1).tanh();
+) {
+    let mut store_precipitation: f64 = 0.0;
+    let mut net_precipitation: f64 = 0.0;
+    if precipitation > pet {
+        net_precipitation = precipitation - pet;
+        // only calculate terms once
+        let tmp_term_1 = *store / x1;
+        let tmp_term_2 = (net_precipitation / x1).tanh();
 
-            let store_precipitation =
-                x1 * (1. - tmp_term_1 * tmp_term_1) * tmp_term_2
-                    / (1. + tmp_term_1 * tmp_term_2);
-            (
-                store + store_precipitation,
-                store_precipitation,
-                net_precipitation,
-            )
-        } else if precipitation < pet {
-            let net_pet = pet - precipitation;
-            // only calculate terms once
-            let tmp_term_1 = store / x1;
-            let tmp_term_2 = (net_pet / x1).tanh();
-            let evapotranspiration = store * (2. - tmp_term_1) * tmp_term_2
-                / (1. + (1. - tmp_term_1) * tmp_term_2);
-            (store - evapotranspiration, 0., 0.)
-        } else {
-            (store, 0., 0.)
-        };
+        store_precipitation = x1 * (1. - tmp_term_1 * tmp_term_1) * tmp_term_2
+            / (1. + tmp_term_1 * tmp_term_2);
+        *store += store_precipitation;
+    } else if precipitation < pet {
+        let net_pet = pet - precipitation;
+        // only calculate terms once
+        let tmp_term_1 = *store / x1;
+        let tmp_term_2 = (net_pet / x1).tanh();
+        let evapotranspiration = *store * (2. - tmp_term_1) * tmp_term_2
+            / (1. + (1. - tmp_term_1) * tmp_term_2);
+        *store -= evapotranspiration;
+    }
 
-    let (store, percolation) = if x1 / store > 1e-3 {
-        let percolation =
-            store * (1. - (1. + (4. / 21. * store / x1).powi(4)).powf(-0.25));
-        (store - percolation, percolation)
-    } else {
-        (store, 0.)
-    };
+    let mut percolation = 0.0;
+    if x1 / *store > 1e-3 {
+        percolation =
+            *store * (1. - (1. + (4. / 9. * *store / x1).powi(4)).powf(-0.25));
+        *store -= percolation;
+    }
 
-    let routing_precipitation =
+    *routing_precipitation =
         net_precipitation - store_precipitation + percolation;
-
-    (store, routing_precipitation)
 }
 
 fn update_routing(
-    store: f64,
-    hydrographs: (Vec<f64>, Vec<f64>),
+    store: &mut f64,
+    hydrographs: &mut (Vec<f64>, Vec<f64>),
+    total_flow: &mut f64,
     unit_hydrographs: &(Vec<f64>, Vec<f64>),
     routing_precipitation: f64,
     x2: f64,
     x3: f64,
-) -> (f64, (Vec<f64>, Vec<f64>), f64) {
-    let hydrographs = update_hydrographs(
-        routing_precipitation,
-        hydrographs,
-        unit_hydrographs,
-    );
+) {
+    update_hydrographs(routing_precipitation, hydrographs, unit_hydrographs);
 
     let q9 = hydrographs.0[0];
     let q1 = hydrographs.1[0];
 
-    let groundwater_exchange = x2 * (store / x3).powf(3.5);
+    let groundwater_exchange = x2 * (*store / x3).powf(3.5);
 
-    let store = (store + q9 + groundwater_exchange).max(1e-3 * x3);
+    *store = (*store + q9 + groundwater_exchange).max(1e-3 * x3);
 
-    let routed_flow = store * (1. - (1. + (store / x3).powi(4)).powf(-0.25));
-    let store = store - routed_flow;
+    let routed_flow = *store * (1. - (1. + (*store / x3).powi(4)).powf(-0.25));
+    *store -= routed_flow;
 
     let direct_flow = (q1 + groundwater_exchange).max(0.);
 
-    let total_flow = routed_flow + direct_flow;
-
-    (store, hydrographs, total_flow)
+    *total_flow = routed_flow + direct_flow;
 }
 
 fn update_hydrographs(
     routing_precipitation: f64,
-    hydrographs: (Vec<f64>, Vec<f64>),
+    hydrographs: &mut (Vec<f64>, Vec<f64>),
     unit_hydrographs: &(Vec<f64>, Vec<f64>),
-) -> (Vec<f64>, Vec<f64>) {
-    let hydrograph_1 = hydrographs.0[1..] // shift existing water forward in time
-        .iter()
-        .chain(std::iter::once(&0.0)) // clear last position
-        .zip(&unit_hydrographs.0)
-        .map(|(h, u)| h + 0.9 * routing_precipitation * u)
-        .collect();
+) {
+    let n1 = hydrographs.0.len();
+    for i in 0..n1 - 1 {
+        hydrographs.0[i] = hydrographs.0[i + 1]
+            + 0.9 * routing_precipitation * unit_hydrographs.0[i];
+    }
+    hydrographs.0[n1 - 1] = 0.0;
 
-    let hydrograph_2 = hydrographs.1[1..] // shift existing water forward in time
-        .iter()
-        .chain(std::iter::once(&0.0)) // clear last position
-        .zip(&unit_hydrographs.1)
-        .map(|(h, u)| h + 0.1 * routing_precipitation * u)
-        .collect();
-
-    (hydrograph_1, hydrograph_2)
+    let n2 = hydrographs.1.len();
+    for i in 0..n2 - 1 {
+        hydrographs.1[i] = hydrographs.1[i + 1]
+            + 0.1 * routing_precipitation * unit_hydrographs.1[i];
+    }
+    hydrographs.1[n2 - 1] = 0.0;
 }
 
 #[pyfunction]
@@ -205,11 +198,8 @@ pub fn py_simulate<'py>(
     data: PyData,
     metadata: PyMetadata,
 ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-    let simulation = simulate(
-        &params.as_array().to_owned(),
-        &data.into_data()?,
-        &metadata.into_metadata(),
-    )?;
+    let simulation =
+        simulate(params.as_array(), data.as_data()?, &metadata.as_metadata())?;
     Ok(simulation.to_pyarray(py))
 }
 
