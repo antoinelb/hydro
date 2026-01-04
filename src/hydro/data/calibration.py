@@ -122,6 +122,8 @@ async def calibrate(
                     }
                     if callback is not None:
                         await callback(done, simulation, results)
+                    # Yield control to allow I/O processing (e.g., receiving stop message)
+                    await asyncio.sleep(0.001)
                     if stop_event is not None and stop_event.is_set():
                         break
                     if done:

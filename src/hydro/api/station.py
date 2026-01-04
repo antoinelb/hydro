@@ -87,4 +87,4 @@ async def _handle_station_message(ws: WebSocket, msg_data: str | None) -> None:
 
 
 async def _send(ws: WebSocket, event: str, data: Any) -> None:
-    await ws.send_json({"type": event, "data": data})
+    await ws.send_json({"type": event, "data": convert_for_json(data)})

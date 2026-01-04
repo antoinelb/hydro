@@ -82,6 +82,7 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
                 )
             )
         case "calibration_stop":
+            print("TEST")
             model = msg.get("data", None)
             if model is None:
                 await _send(
@@ -90,6 +91,9 @@ async def _handle_message(ws: WebSocket, msg: dict[str, Any]) -> None:
                     "The model must be provided.",
                 )
                 return
+            print(
+                f"{model}_stop_event", hasattr(ws.state, f"{model}_stop_event")
+            )
             if hasattr(ws.state, f"{model}_stop_event"):
                 getattr(ws.state, f"{model}_stop_event").set()
         case _:
@@ -184,20 +188,9 @@ async def _handle_calibration_start_message(
     )
     metadata = await hydro.read_metadata(id)
 
-    params = calibration.calibrate(
-        calib_data,
-        metadata,
-        msg_data["climate_model"],
-        msg_data["snow_model"],
-        msg_data["objective"],
-        msg_data["algorithm"],
-        msg_data["algorithm_params"],
-    )
-
     async def callback(
         done: bool, predictions: pl.DataFrame, results: dict[str, float]
     ) -> None:
-        print(results)
         await _send(
             ws,
             "calibration_step",

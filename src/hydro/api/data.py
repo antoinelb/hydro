@@ -187,7 +187,7 @@ async def _handle_datasets_message(
 
 
 async def _send(ws: WebSocket, event: str, data: Any) -> None:
-    await ws.send_json({"type": event, "data": data})
+    await ws.send_json({"type": event, "data": convert_for_json(data)})
 
 
 def _prepare_data_to_show(data: pl.DataFrame) -> pl.DataFrame:
