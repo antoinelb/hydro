@@ -24,7 +24,7 @@ pub fn simulate(
 
     let precipitation = data.precipitation;
     let pet = data.pet;
-    let area = metadata.area;
+    let area = metadata.area * 1000.0 * 1000.0;
 
     let mut discharge: Vec<f64> = vec![];
 
@@ -56,7 +56,7 @@ pub fn simulate(
             x2,
             x3,
         );
-        discharge_ = discharge_ * 1000.0 * area / (3600.0 * 24.0); // mm/day to m^3/s
+        // discharge_ = discharge_ * 1000.0 * area / (3600.0 * 24.0); // mm/day to m^3/s
         discharge.push(discharge_);
     }
 

@@ -76,14 +76,17 @@ def read_stations() -> pl.DataFrame:
 
 async def read_data(id: str, *, refresh: bool = False) -> pl.DataFrame:
     path = paths.data_dir / "raw" / "hydro" / "stations" / f"{id}.ipc"
+    metadata = await read_metadata(id)
 
     if path.exists() and not refresh:
-        return pl.read_ipc(path)
+        data = pl.read_ipc(path)
     else:
         path.parent.mkdir(exist_ok=True, parents=True)
         data = await _fetch_data(id)
         data.write_ipc(path)
-        return data
+    return data.with_columns(
+        pl.col("discharge") * 86.4 / metadata.area
+    )
 
 
 async def read_metadata(id: str) -> Metadata:

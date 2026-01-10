@@ -25,7 +25,6 @@ struct SceParams {
     pub population: Array2<f64>,
     pub objectives: Array2<f64>,
     pub criteria: Array1<f64>,
-    pub best_simulation: Array1<f64>,
     pub n_calls: usize,
     pub n_complexes: usize,
     pub n_per_complex: usize,
@@ -114,12 +113,10 @@ impl Sce {
             rng,
             done: false,
         };
-        let best_simulation: Array1<f64> = Array1::default(0);
         let sce_params = SceParams {
             population,
             objectives,
             criteria,
-            best_simulation,
             n_calls: 0,
             n_complexes,
             n_per_complex,
@@ -170,11 +167,6 @@ impl Sce {
         self.calibration_params.params = population.row(0).to_owned();
         self.sce_params.population = population;
         self.sce_params.objectives = objectives;
-        self.sce_params.best_simulation = (self.calibration_params.simulate)(
-            self.calibration_params.params.view(),
-            data,
-            metadata,
-        )?;
 
         Ok(())
     }
@@ -186,10 +178,16 @@ impl Sce {
         observations: ArrayView1<f64>,
     ) -> Result<(bool, Array1<f64>, Array1<f64>, Array1<f64>), Error> {
         if self.calibration_params.done {
+            // Recompute simulation for the final result (only happens once when done)
+            let best_simulation = (self.calibration_params.simulate)(
+                self.calibration_params.params.view(),
+                data,
+                metadata,
+            )?;
             return Ok((
                 true,
                 self.calibration_params.params.clone(),
-                self.sce_params.best_simulation.clone(),
+                best_simulation,
                 self.sce_params.objectives.row(0).to_owned(),
             ));
         }
@@ -269,25 +267,28 @@ impl Sce {
             f64::INFINITY
         };
 
-        self.calibration_params.done = n_calls
-            > self.sce_params.max_evaluations
+        self.calibration_params.done = n_calls > self.sce_params.max_evaluations
             || gnrng < self.sce_params.geometric_range_threshold
             || criteria_change < self.sce_params.p_convergence_threshold;
         self.calibration_params.params = population.row(0).to_owned();
         self.sce_params.n_calls = n_calls;
-        self.sce_params.population = population;
-        self.sce_params.objectives = objectives;
-        self.sce_params.best_simulation = (self.calibration_params.simulate)(
+
+        // Compute simulation once and return directly (no clone)
+        let best_simulation = (self.calibration_params.simulate)(
             self.calibration_params.params.view(),
             data,
             metadata,
         )?;
+        let best_objectives = objectives.row(0).to_owned();
+
+        self.sce_params.population = population;
+        self.sce_params.objectives = objectives;
 
         Ok((
             self.calibration_params.done,
             self.calibration_params.params.clone(),
-            self.sce_params.best_simulation.clone(),
-            self.sce_params.objectives.row(0).to_owned(),
+            best_simulation,
+            best_objectives,
         ))
     }
 }
@@ -535,6 +536,7 @@ fn evolve_complexes(
     n_evolution_steps: usize,
     rng: &mut ChaCha8Rng,
 ) -> Result<usize, Error> {
+    // Sequential evolution (parallel version had convergence issues)
     for igs in 0..n_complexes {
         let cx = &mut complexes[igs];
         let cf = &mut complex_objectives[igs];
@@ -545,7 +547,7 @@ fn evolve_complexes(
             let mut s = cx.select(Axis(0), &simplex_indices);
             let mut sf = cf.select(Axis(0), &simplex_indices);
 
-            let (snew, fnew, new_n_calls) = evolve_complexes_competitively(
+            let (snew, fnew, calls_made) = evolve_complex_step(
                 s.view(),
                 sf.view(),
                 lower_bounds,
@@ -556,10 +558,9 @@ fn evolve_complexes(
                 observations,
                 objective_idx,
                 is_minimization,
-                n_calls,
                 rng,
             )?;
-            n_calls = new_n_calls;
+            n_calls += calls_made;
 
             // replace worst point in simplex
             let last_s_idx = s.nrows() - 1;
@@ -577,6 +578,91 @@ fn evolve_complexes(
         }
     }
     Ok(n_calls)
+}
+
+/// Single step of complex evolution (extracted for parallel execution)
+fn evolve_complex_step(
+    simplex: ArrayView2<f64>,
+    simplex_objectives: ArrayView2<f64>,
+    lower_bounds: ArrayView1<f64>,
+    upper_bounds: ArrayView1<f64>,
+    simulate: &SimulateFn,
+    data: Data,
+    metadata: &Metadata,
+    observations: ArrayView1<f64>,
+    objective_idx: usize,
+    is_minimization: bool,
+    rng: &mut ChaCha8Rng,
+) -> Result<(Array1<f64>, Array1<f64>, usize), Error> {
+    // This is the same logic as evolve_complexes_competitively but returns call count delta
+    let alpha = 1.0;
+    let beta = 0.5;
+    let mut calls = 0;
+
+    let range = &upper_bounds - &lower_bounds;
+
+    let is_worse = |new_val: f64, old_val: f64| -> bool {
+        if is_minimization {
+            new_val > old_val
+        } else {
+            new_val < old_val
+        }
+    };
+
+    // worst point and objective
+    let sw = simplex.row(simplex.nrows() - 1);
+    let fw = simplex_objectives[[simplex_objectives.nrows() - 1, objective_idx]];
+
+    // centroid excluding worst (all rows except last)
+    let ce = simplex
+        .slice(s![0..simplex.nrows() - 1, ..])
+        .mean_axis(Axis(0))
+        .unwrap();
+
+    // reflection
+    let mut snew: Array1<f64> = &ce + alpha * (&ce - &sw);
+
+    // check bounds
+    let out_of_bounds =
+        snew.iter().zip(lower_bounds.iter()).any(|(s, lb)| s < lb)
+            || snew.iter().zip(upper_bounds.iter()).any(|(s, ub)| s > ub);
+
+    if out_of_bounds {
+        let random_values: Array1<f64> = Array1::random_using(
+            snew.len(),
+            Uniform::new(0., 1.).unwrap(),
+            rng,
+        );
+        snew = &random_values * &range + lower_bounds;
+    }
+
+    // evaluate reflection point
+    let simulation = simulate(snew.view(), data, metadata)?;
+    let mut fnew = evaluate_simulation(observations, simulation.view())?;
+    calls += 1;
+
+    // if reflection failed (worse than worst), try contraction
+    if is_worse(fnew[objective_idx], fw) {
+        snew = sw.to_owned() + beta * (&ce - &sw);
+        let simulation = simulate(snew.view(), data, metadata)?;
+        fnew = evaluate_simulation(observations, simulation.view())?;
+        calls += 1;
+
+        // if contraction also failed, use random point
+        if is_worse(fnew[objective_idx], fw) {
+            let random_values: Array1<f64> = Array1::random_using(
+                snew.len(),
+                Uniform::new(0., 1.).unwrap(),
+                rng,
+            );
+            snew = &random_values * &range + lower_bounds;
+            let simulation = simulate(snew.view(), data, metadata)?;
+            fnew = evaluate_simulation(observations, simulation.view())?;
+            calls += 1;
+        }
+    }
+
+    Ok((snew, fnew, calls))
 }
 
 fn select_simplex_indices(
@@ -606,90 +692,6 @@ fn select_simplex_indices(
 
     indices.sort_by(|a, b| a.partial_cmp(b).unwrap());
     indices
-}
-
-fn evolve_complexes_competitively(
-    simplex: ArrayView2<f64>,
-    simplex_objectives: ArrayView2<f64>,
-    lower_bounds: ArrayView1<f64>,
-    upper_bounds: ArrayView1<f64>,
-    simulate: &SimulateFn,
-    data: Data,
-    metadata: &Metadata,
-    observations: ArrayView1<f64>,
-    objective_idx: usize,
-    is_minimization: bool,
-    n_calls: usize,
-    rng: &mut ChaCha8Rng,
-) -> Result<(Array1<f64>, Array1<f64>, usize), Error> {
-    let alpha = 1.0;
-    let beta = 0.5;
-
-    let range = &upper_bounds - &lower_bounds;
-
-    let is_worse = |new_val: f64, old_val: f64| -> bool {
-        if is_minimization {
-            new_val > old_val
-        } else {
-            new_val < old_val
-        }
-    };
-
-    // worst point and objective
-    let sw = simplex.row(simplex.nrows() - 1);
-    let fw =
-        simplex_objectives[[simplex_objectives.nrows() - 1, objective_idx]];
-
-    // centroid excluding worst (all rows except last)
-    let ce = simplex
-        .slice(s![0..simplex.nrows() - 1, ..])
-        .mean_axis(Axis(0))
-        .unwrap();
-
-    // reflection
-    let mut snew: Array1<f64> = &ce + alpha * (&ce - &sw);
-
-    // check bounds
-    let out_of_bounds =
-        snew.iter().zip(lower_bounds.iter()).any(|(s, lb)| s < lb)
-            || snew.iter().zip(upper_bounds.iter()).any(|(s, ub)| s > ub);
-
-    if out_of_bounds {
-        let random_values: Array1<f64> = Array1::random_using(
-            snew.len(),
-            Uniform::new(0., 1.).unwrap(),
-            rng,
-        );
-        snew = &random_values * &range + lower_bounds;
-    }
-
-    // evaluate reflection point
-    let simulation = simulate(snew.view(), data, metadata)?;
-    let mut fnew = evaluate_simulation(observations, simulation.view())?;
-    let mut n_calls = n_calls + 1;
-
-    // if reflection failed (worse than worst), try contraction
-    if is_worse(fnew[objective_idx], fw) {
-        snew = sw.to_owned() + beta * (&ce - &sw);
-        let simulation = simulate(snew.view(), data, metadata)?;
-        fnew = evaluate_simulation(observations, simulation.view())?;
-        n_calls += 1;
-
-        // if contraction also failed, use random point
-        if is_worse(fnew[objective_idx], fw) {
-            let random_values: Array1<f64> = Array1::random_using(
-                snew.len(),
-                Uniform::new(0., 1.).unwrap(),
-                rng,
-            );
-            snew = &random_values * &range + lower_bounds;
-            let simulation = simulate(snew.view(), data, metadata)?;
-            fnew = evaluate_simulation(observations, simulation.view())?;
-            n_calls += 1;
-        }
-    }
-
-    Ok((snew, fnew, n_calls))
 }
 
 fn merge_complexes(

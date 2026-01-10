@@ -121,6 +121,8 @@ async def calibrate(
                         "kge": objectives[2],
                     }
                     if callback is not None:
+                        print(simulation[:10, "discharge"])
+                        print(observations[:10])
                         await callback(done, simulation, results)
                     # Yield control to allow I/O processing (e.g., receiving stop message)
                     await asyncio.sleep(0.001)

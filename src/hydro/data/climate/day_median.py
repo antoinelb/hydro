@@ -15,7 +15,7 @@ def init() -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
 def simulate(
     params: npt.NDArray[np.float64], data: pl.DataFrame, metadata: Metadata
 ) -> npt.NDArray[np.float64]:
-    days = data.select(pl.col("date").dt.ordinal_day().mod(365))[
+    days = data.select((pl.col("date").dt.ordinal_day() - 1).mod(365))[
         "date"
     ].to_numpy()
     return params[days]
@@ -27,7 +27,7 @@ def calibrate(data: pl.DataFrame) -> npt.NDArray[np.float64]:
             "discharge",
             "date",
         )
-        .group_by(pl.col("date").dt.ordinal_day().mod(365).alias("day"))
+        .group_by((pl.col("date").dt.ordinal_day().mod(365) - 1).alias("day"))
         .agg(pl.col("discharge").median())
         .sort("day")["discharge"]
         .to_numpy()

@@ -11,6 +11,3 @@ build-backend = "maturin"
 features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "hydro_rs"
-
-[tool.maturin.hooks]
-post-build = "cargo run --bin stub_gen"
