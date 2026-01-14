@@ -1,6 +1,6 @@
 # Hydro
 
-Preuve de concept d'une plateforme d'hydrologie opérationnelle pour le Québec. Le projet démontre la chaîne complète de modélisation hydrologique, de l'acquisition des données à la calibration des modèles.
+Preuve de concept d'une plateforme d'hydrologie opérationnelle pour toute station hydrométrique du Québec. Le projet démontre la chaîne complète de modélisation hydrologique, de l'acquisition des données à la calibration des modèles.
 
 ## Fonctionnalités implémentées
 
