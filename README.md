@@ -48,6 +48,35 @@ Preuve de concept d'une plateforme d'hydrologie opérationnelle pour toute stati
 - Architecture Elm-like (Model-Update-View)
 - Communication WebSocket
 
+## Installation
+
+### Prérequis
+
+- Python 3.13+
+- Rust (pour compiler l'extension hydro-rs)
+- [uv](https://docs.astral.sh/uv/) (gestionnaire de paquets Python)
+
+### Étapes
+
+```bash
+# Cloner le dépôt
+git clone <url-du-repo>
+cd hydro
+
+# Installer les dépendances (inclut la compilation de l'extension Rust)
+uv sync
+
+# Configurer l'environnement (optionnel)
+# Créer un fichier .env avec les variables suivantes :
+# HOST=127.0.0.1
+# PORT=8002
+# DEBUG=1
+# RELOAD=1
+
+# Lancer l'application
+hydro
+```
+
 ## Commandes
 
 ```bash
